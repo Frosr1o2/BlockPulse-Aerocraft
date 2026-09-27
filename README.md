@@ -53,7 +53,7 @@ install.sh                        installer / uninstaller
 `app/*.jar` is a build output or a supplied artifact and is not checked in.
 
 ## Build
-
+>Build.sh file are not in the repo (security issues)
 Requirements: JDK 21+, Maven 3.9+.
 
 ```sh
@@ -208,6 +208,7 @@ AeroCraft FXML-independent UI shell smoke test passed.
 - **The reported version is still `0.6.2`** — the official
   `build-info.properties` is left untouched on purpose: bumping it would make
   the launcher demand an update it cannot install.
+    >build-info.properties file are not in the repo (security issues)
 - **The modpack update channel is authenticated only by TLS.** The manifest and
   the archive it names are fetched over the same connection, and the SHA-256
   used to check the archive comes from that same manifest, so the checksum is
@@ -241,8 +242,9 @@ AeroCraft FXML-independent UI shell smoke test passed.
   current head of an AUR repository and run the PKGBUILD it found there, which
   meant executing instructions fetched over the network at install time from a
   repository this project does not control.
-- **Not tested** on Fedora, Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
-
+- **Not tested** Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
+- **Testing** Fedora
+  
 ## What is and is not in this repository
 
 Contains: the wrapper, the installer, the JavaFX front end and platform layer,
