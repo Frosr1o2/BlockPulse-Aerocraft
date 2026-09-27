@@ -425,7 +425,7 @@ a key" search flags both.
 
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
-The project's own terms are in [`LICENCE`](LICENCE); they cover authorship of
+The project's own terms are in [`LICENSE`](LICENSE); they cover authorship of
 the launcher and the conditions for modifying and redistributing it.
 
 The source tree here was recovered by decompiling the official launcher's jars.
