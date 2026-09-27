@@ -65,7 +65,9 @@ FX_CANDS=()
 if [ -n "${JAVAFX_LIB:-}" ]; then
     FX_CANDS=("$JAVAFX_LIB")
 else
-    for c in /usr/lib/jvm/*openjfx*/lib /usr/share/openjfx/lib /usr/lib/openjfx/lib "${XDG_DATA_HOME:-$HOME/.local/share}"/blockpulse-launcher/javafx/lib; do
+    for c in /usr/lib/jvm/*openjfx*/lib /usr/share/openjfx/lib /usr/lib/openjfx/lib \
+             /usr/lib64/openjfx/lib /usr/share/openjfx/lib64 /usr/lib64/jvm/*/lib \
+             "${XDG_DATA_HOME:-$HOME/.local/share}"/blockpulse-launcher/javafx/lib; do
         [ -f "$c/javafx.controls.jar" ] && FX_CANDS+=("$c")
     done
     if command -v pacman >/dev/null 2>&1; then
@@ -76,6 +78,14 @@ else
         while IFS= read -r c; do
             [ -n "$c" ] && FX_CANDS+=("$(dirname "$c")")
         done < <(dpkg -L openjfx 2>/dev/null | awk '/\/javafx\.controls\.jar$/ {print}')
+    elif command -v rpm >/dev/null 2>&1; then
+        # Fedora and other rpm distros: ask the database where the jar is,
+        # guessing a path does not survive lib64 and per-JDK packages.
+        while IFS= read -r c; do
+            [ -n "$c" ] && FX_CANDS+=("$(dirname "$c")")
+        done < <(rpm -qa 2>/dev/null | grep -iE '^(openjfx|java-[0-9]+-openjfx)$' \
+                 | while IFS= read -r pkg; do rpm -ql "$pkg" 2>/dev/null; done \
+                 | awk -F/ '$NF == "javafx.controls.jar" {print}')
     fi
 fi
 
@@ -165,11 +175,17 @@ if [ "${#PAIR_JAVA[@]}" -eq 0 ]; then
         { [ -n "$m" ] && [ "$m" -ge 21 ]; } 2>/dev/null && saw_java21=1 && break
     done
     if [ "$saw_java21" = 0 ]; then
-        if command -v apt-get >/dev/null 2>&1; then msg="Java 21+ not found. Install:  sudo apt-get install openjdk-21-jre openjfx"; else msg="Java 21+ not found. Install:  sudo pacman -S jdk21-openjdk java21-openjfx"; fi
+        if command -v apt-get >/dev/null 2>&1; then msg="Java 21+ not found. Install:  sudo apt-get install openjdk-21-jre openjfx"
+        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then msg="Java 21+ not found. Install:  sudo dnf install java-21-openjdk openjfx"
+        else msg="Java 21+ not found. Install:  sudo pacman -S jdk21-openjdk java21-openjfx"; fi
     elif [ "${#FX_CANDS[@]}" = 0 ]; then
-        if command -v apt-get >/dev/null 2>&1; then msg="JavaFX not found. Install:  sudo apt-get install openjfx"; else msg="JavaFX not found. Install:  sudo pacman -S java21-openjfx"; fi
+        if command -v apt-get >/dev/null 2>&1; then msg="JavaFX not found. Install:  sudo apt-get install openjfx"
+        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then msg="JavaFX not found. Install:  sudo dnf install openjfx"
+        else msg="JavaFX not found. Install:  sudo pacman -S java21-openjfx"; fi
     else
-        if command -v apt-get >/dev/null 2>&1; then msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install OpenJDK 21 and OpenJFX from the same distro repositories."; else msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install matching ones:  sudo pacman -S jdk21-openjdk java21-openjfx"; fi
+        if command -v apt-get >/dev/null 2>&1; then msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install OpenJDK 21 and OpenJFX from the same distro repositories."
+        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install matching ones:  sudo dnf install java-21-openjdk openjfx"
+        else msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install matching ones:  sudo pacman -S jdk21-openjdk java21-openjfx"; fi
     fi
     echo "blockpulse-launcher: $msg" >&2
     command -v notify-send >/dev/null 2>&1 && notify-send "BlockPulse Launcher" "$msg"

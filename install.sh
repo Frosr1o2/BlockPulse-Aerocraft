@@ -88,11 +88,26 @@ javafx_path() {
     for c in \
         /usr/share/openjfx/lib \
         /usr/lib/openjfx/lib \
+        /usr/lib64/openjfx/lib \
+        /usr/share/openjfx/lib64 \
         /usr/share/java/openjfx/lib \
         /usr/lib/jvm/*openjfx*/lib \
-        /usr/lib/jvm/*/lib; do
+        /usr/lib/jvm/*/lib \
+        /usr/lib64/jvm/*/lib; do
         [ -f "$c/javafx.controls.jar" ] && { printf '%s\n' "$c"; return 0; }
     done
+    # Fedora and other rpm distros keep the versioned JavaFX packages, so ask
+    # rpm where the jar actually landed instead of guessing a path.
+    if rpm_installed_any openjfx java-21-openjfx java-22-openjfx java-23-openjfx; then
+        local found
+        found="$(rpm -qa 2>/dev/null | grep -iE '^(openjfx|java-[0-9]+-openjfx)$' \
+            | while IFS= read -r pkg; do rpm -ql "$pkg" 2>/dev/null; done \
+            | awk -F/ '$NF == "javafx.controls.jar" {print $0}' | head -1)"
+        if [ -n "$found" ] && [ -f "$found" ]; then
+            printf '%s\n' "$(dirname "$found")"
+            return 0
+        fi
+    fi
     return 1
 }
 package_manager() {
