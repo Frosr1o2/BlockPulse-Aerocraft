@@ -100,9 +100,33 @@ package_manager() {
         printf '%s\n' arch
     elif has apt-get; then
         printf '%s\n' debian
+    elif has dnf || has dnf5 || has microdnf; then
+        printf '%s\n' fedora
     else
         printf '%s\n' unsupported
     fi
+}
+dnf_cmd() {
+    if has dnf5; then
+        printf '%s\n' dnf5
+    elif has dnf; then
+        printf '%s\n' dnf
+    else
+        printf '%s\n' microdnf
+    fi
+}
+rpm_installed() {
+    has rpm || return 1
+    rpm -q "$1" >/dev/null 2>&1
+}
+# Fedora ships a runtime under several names depending on the release, and the
+# versioned name changes with every JDK bump, so accept any of them.
+rpm_installed_any() {
+    local candidate
+    for candidate in "$@"; do
+        rpm_installed "$candidate" && return 0
+    done
+    return 1
 }
 missing_dependencies() {
     local manager="$1"
@@ -129,6 +153,17 @@ missing_dependencies() {
                 dpkg -s xwayland >/dev/null 2>&1 || DEP_MISSING+=(xwayland)
             fi
             has secret-tool || DEP_MISSING+=(libsecret-tools)
+            ;;
+        fedora)
+            if ! java21_path >/dev/null 2>&1 && ! rpm_installed_any java-21-openjdk java-21-openjdk-headless java-1.21.0-openjdk; then
+                DEP_MISSING+=(java-21-openjdk)
+            fi
+            javafx_path >/dev/null 2>&1 || DEP_MISSING+=(java-21-openjfx)
+            has xdg-open || DEP_MISSING+=(xdg-utils)
+            if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
+                rpm_installed xorg-x11-server-Xwayland || DEP_MISSING+=(xorg-x11-server-Xwayland)
+            fi
+            has secret-tool || DEP_MISSING+=(libsecret)
             ;;
     esac
 }
@@ -158,6 +193,29 @@ install_arch_javafx() {
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
     return 1
 }
+install_fedora_javafx() {
+    local dnf pkg
+    dnf="$(dnf_cmd)"
+    # JavaFX ships per JDK version on Fedora, so the package name follows the
+    # runtime. Nothing is built from source and nothing is pulled from a
+    # third-party repository: if the matching package is missing, the user
+    # chooses the path deliberately.
+    for pkg in java-21-openjfx openjfx; do
+        if rpm_installed "$pkg" || "$dnf" -q list --available "$pkg" >/dev/null 2>&1; then
+            root_run "$dnf" install -y "$pkg"
+            record_package "$pkg"
+            return 0
+        fi
+    done
+    say ""
+    say "В репозиториях нет JavaFX для Java 21, и установщик не берёт его из"
+    say "сторонних источников: подключать репозиторий — решение пользователя."
+    say "Варианты:"
+    say "  * sudo dnf install java-21-openjfx   (обычно есть в fedora)"
+    say "  * другой дистрибутив / репозиторий с JavaFX 21"
+    say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
+    return 1
+}
 install_dependencies() {
     local manager="$1"
     case "$manager" in
@@ -171,7 +229,9 @@ install_dependencies() {
                 record_package xdg-utils
             fi
             if ! javafx_path >/dev/null 2>&1; then
-                install_arch_javafx
+                # || true: под 'set -e' непустой return оборвал бы установку до
+                # итоговой проверки missing_dependencies ниже
+                install_arch_javafx || true
             fi
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 if ! pacman -Qq xorg-xwayland >/dev/null 2>&1; then
@@ -207,6 +267,29 @@ install_dependencies() {
             if ! dpkg -s libsecret-tools >/dev/null 2>&1; then
                 root_run apt-get install -y libsecret-tools
                 record_package libsecret-tools
+            fi
+            ;;
+        fedora)
+            local dnf
+            dnf="$(dnf_cmd)"
+            if ! java21_path >/dev/null 2>&1 && ! rpm_installed_any java-21-openjdk java-21-openjdk-headless java-1.21.0-openjdk; then
+                root_run "$dnf" install -y java-21-openjdk
+                record_package java-21-openjdk
+            fi
+            if ! javafx_path >/dev/null 2>&1; then
+                install_fedora_javafx || true
+            fi
+            if ! has xdg-open && ! rpm_installed xdg-utils; then
+                root_run "$dnf" install -y xdg-utils
+                record_package xdg-utils
+            fi
+            if { [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; } && ! rpm_installed xorg-x11-server-Xwayland; then
+                root_run "$dnf" install -y xorg-x11-server-Xwayland
+                record_package xorg-x11-server-Xwayland
+            fi
+            if ! has secret-tool && ! rpm_installed libsecret; then
+                root_run "$dnf" install -y libsecret
+                record_package libsecret
             fi
             ;;
     esac
@@ -326,6 +409,7 @@ uninstall_dependencies() {
         case "$manager" in
             arch) pacman -Qq "$pkg" >/dev/null 2>&1 && present="$present $pkg" ;;
             debian) dpkg -s "$pkg" >/dev/null 2>&1 && present="$present $pkg" ;;
+            fedora) rpm_installed "$pkg" && present="$present $pkg" ;;
         esac
     done
     present="${present# }"
@@ -337,6 +421,10 @@ uninstall_dependencies() {
     case "$manager" in
         arch) root_run pacman -Rns --noconfirm $present ;;
         debian) root_run apt-get remove -y $present; root_run apt-get autoremove -y ;;
+        fedora)
+            root_run "$(dnf_cmd)" remove -y $present
+            root_run "$(dnf_cmd)" autoremove -y
+            ;;
     esac
     rm -f "$PACKAGE_LIST"
     say "Зависимости удалены."
@@ -356,7 +444,7 @@ require_artifacts() {
 Нужны два файла в app/:
   Launcher.jar                 официальный бэкенд AeroCraft 0.6.2 (не собирается
                                из этого репозитория, скачивается сам)
-  blockpulse-launcher-ui.jar   слой для Linux/macOS/BSD, собирается ./build.sh
+  blockpulse-launcher-ui.jar   слой для Linux/macOS/BSD (релизный артефакт)
 
 Положить оба в:
   $BASE_DIR/app/
@@ -446,7 +534,7 @@ say "Каталог установки: $INSTALL_DIR"
 manager="$(package_manager)"
 
 if [ "$manager" = unsupported ]; then
-    say "Поддерживаются Arch-based и Debian-based системы."
+    say "Поддерживаются Arch-based, Debian-based и Fedora/RHEL-системы (dnf)."
     exit 1
 fi
 
