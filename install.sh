@@ -341,8 +341,38 @@ uninstall_dependencies() {
     rm -f "$PACKAGE_LIST"
     say "Зависимости удалены."
 }
+require_artifacts() {
+    local missing=0
+    for artifact in Launcher.jar blockpulse-launcher-ui.jar; do
+        if [ ! -f "$BASE_DIR/app/$artifact" ]; then
+            say "Не найден app/$artifact"
+            missing=1
+        fi
+    done
+    if [ "$missing" -ne 0 ]; then
+        cat <<EOF_MISSING
+
+В этот репозиторий официальный билд не входит и не распространяется.
+Нужны два файла в app/:
+  Launcher.jar                 официальный бэкенд AeroCraft 0.6.2 (не собирается
+                               из этого репозитория, скачивается сам)
+  blockpulse-launcher-ui.jar   слой для Linux/macOS/BSD, собирается ./build.sh
+
+Положить оба в:
+  $BASE_DIR/app/
+
+и запустить установку снова.
+EOF_MISSING
+        return 1
+    fi
+    if [ ! -d "$BASE_DIR/app/profiles" ] || [ -z "$(find "$BASE_DIR/app/profiles" -maxdepth 1 -type f -name '*.json' -print -quit)" ]; then
+        say "В app/profiles нет ни одного профиля - установка продолжится без них."
+    fi
+}
+
 install_launcher() {
     local manager="$1"
+    require_artifacts || exit 1
     mkdir -p "$APP_DIR" "$APP_DIR/profiles" "$BIN_DIR"
     install -Dm644 "$BASE_DIR/app/Launcher.jar" "$APP_DIR/Launcher.jar"
     install -Dm644 "$BASE_DIR/app/blockpulse-launcher-ui.jar" "$APP_DIR/blockpulse-launcher-ui.jar"
