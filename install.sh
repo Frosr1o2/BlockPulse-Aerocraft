@@ -351,6 +351,7 @@ debian_package_available() {
 # session the package lists start out stale, and "no such package" and "no
 # candidate yet" look identical from the outside.
 debian_explain_missing() {
+    [ "$DEBUG" = 1 ] || return 0
     say ""
     say "Что отвечает apt про первый кандидат ($1):"
     if has apt-cache; then
@@ -695,20 +696,28 @@ BlockPulse Launcher $VERSION
 ./install.sh --uninstall --keep-game
                                 то же, но оставить Minecraft
 ./install.sh --uninstall-all     то же, плюс удалить пакеты, которые ставил установщик
+./install.sh --debug             подробный вывод: что отвечает пакетный менеджер
 ./install.sh --help
 EOF_USAGE
 }
 
 KEEP_GAME=0
+DEBUG=0
 MODE=install
-case "${1:-}" in
-    --help|-h) usage; exit 0 ;;
-    --uninstall) MODE=uninstall ;;
-    --uninstall-all) MODE=uninstall-all ;;
-    --keep-game) KEEP_GAME=1 ;;
-    "") ;;
-    *) usage; exit 2 ;;
-esac
+# Every argument is inspected, not just the first: the documented
+# `--uninstall --keep-game` used to drop the second flag on the floor, and the
+# game directory was removed despite the user asking to keep it.
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h) usage; exit 0 ;;
+        --uninstall) MODE=uninstall ;;
+        --uninstall-all) MODE=uninstall-all ;;
+        --keep-game) KEEP_GAME=1 ;;
+        --debug) DEBUG=1 ;;
+        "") ;;
+        *) usage; exit 2 ;;
+    esac
+done
 
 if [ "$MODE" != install ]; then
     # dependencies first: the list lives in the state dir that gets wiped below

@@ -91,6 +91,7 @@ installation side of the port, not the code.
 blockpulse-launcher           # run
 blockpulse-launcher --diagnose
 blockpulse-launcher --reset-graphics
+./install.sh --debug            # installer says what the package manager answered
 ```
 
 `install.sh` refuses to install anything if the two jars are missing and prints
@@ -289,7 +290,11 @@ AeroCraft FXML-independent UI shell smoke test passed.
   simply false. It now resolves the module and reports the version, warning when
   it is older than 21. Getting JavaFX 21 on Ubuntu 24.04 means a distribution
   that has it (Debian 13 and newer) or SDKMAN/coursier; the installer will not
-  add a PPA on its own.
+  add a PPA on its own. In practice the mismatch turned out not to be fatal: on
+  Mint 22.3 the launcher **did start and run** on the distribution's JavaFX 11
+  with a Java 21 runtime. Read the warning as "this combination is outside what
+  was tested", not as "it does not work" - the installer prints the version it
+  found either way.
 
 > **Installing from a live session does not persist.** The live ISO runs in RAM,
 > so `/home`, the launcher and the installed packages are gone on reboot. Use it
