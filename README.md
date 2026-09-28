@@ -270,7 +270,7 @@ Does not contain, on purpose:
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
 This repository is licensed under the GNU GPL v3; the text is in
-[`LICENCE`](LICENCE). It covers only the code in this repository, which is all
+[`LICENSE`](LICENSE). It covers only the code in this repository, which is all
 original work. All trademarks and the game content belong to their respective
 owners.
 
