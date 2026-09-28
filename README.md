@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="blockpulse-launcher.png" width="128" height="128" alt="blockpulse-launcher Logo">
+</p>
+
 # BlockPulse Aerocraft Launcher — platform layer and installer for Linux, macOS and BSD
 
 ![Unofficial](assets/unofficial-badge.svg)
@@ -7,77 +11,75 @@
 > trademarks and the game content belong to their respective owners.
 
 The official BlockPulse Aerocraft launcher ships as compiled jars for Windows
-only. This repository contains the **original** code that makes it usable on
-Linux, macOS and BSD:
+only. This repository holds the **packaging** side of running it on Linux,
+macOS and BSD — the runtime wrapper, the installer, the modpack profiles and
+both jars, so a clone is ready to install:
 
 - `blockpulse-launcher` — a runtime wrapper that finds a Java 21 runtime and
   JavaFX, probes the renderers and starts the launcher;
-- `launcher-ui/` — the JavaFX front end and the platform layer (OS detection,
-  install locations, theme, keyring, credential files, update channel rules);
 - `install.sh` — installer, uninstaller and package bookkeeping;
 - `app/profiles/` — the modpack profile definitions the launcher expects.
 
-**The official backend is not part of this repository and is not
-redistributed here.** `app/Launcher.jar` is the official AeroCraft 0.6.2
-artifact; you supply your own copy from the project's release channel. Nothing
-in this repository is derived from decompiling it, and no decompiled source is
-published here.
+**This repository contains no launcher source.** No decompiled code is
+published here, and neither jar is built from source in this repository. Both
+artifacts are included as-is so that a clone is ready to install.
+
+If you came here to build the launcher from source, this is the wrong
+repository — there is nothing to build.
 
 ---
 
-## What you need first
+## Where to get the two jars
 
-| File | Where it comes from |
-|---|---|
-| `app/Launcher.jar` | the official AeroCraft distribution. Not built from this repository, not redistributed by it |
-| `app/blockpulse-launcher-ui.jar` | built from this repository: `./build.sh` |
+Both jars are checked in, so a clone is ready to install. If you would rather
+download them directly:
 
-The UI layer talks to the backend through reflection
-(`Class.forName("pro.gravit.launcher.core.api....")`), so it compiles against
-nothing from the backend and the two jars stay independently replaceable.
+| File | Size | SHA-256 |
+|---|---|---|
+| [`app/Launcher.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/HEAD/app/Launcher.jar) | 5962532 B | `44d8bdcd978302ee2bdcfdeb042d974fbf267d5abe93206fbf2435e392240fbb` |
+| [`app/blockpulse-launcher-ui.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/HEAD/app/blockpulse-launcher-ui.jar) | 991708 B | `6bd3f5156dc34da109f4fd65b01a128f15b484d2abb60c9daa84bc30d7fcb92d` |
+
+`Launcher.jar` is the official AeroCraft 0.6.2 backend, taken from the official
+distribution and included here **unmodified** — it is not built from source, not
+patched, and its own terms apply to it. The launcher verifies its code-signing
+chain at startup, so an edited copy will not start; take it from the official
+project if you prefer their current build rather than the pinned one here.
+`blockpulse-launcher-ui.jar` is this project's own build and is unsigned.
+
+Verify what you have before installing:
+
+```sh
+cd app
+sha256sum -c <<'EOF'
+44d8bdcd978302ee2bdcfdeb042d974fbf267d5abe93206fbf2435e392240fbb  Launcher.jar
+6bd3f5156dc34da109f4fd65b01a128f15b484d2abb60c9daa84bc30d7fcb92d  blockpulse-launcher-ui.jar
+EOF
+```
+
+then
+
+```sh
+cd .. && ./install.sh
+```
+
+The two jars are independent — the UI reaches the backend through reflection
+(`Class.forName("pro.gravit.launcher.core.api....")`) — so either can be
+replaced on its own.
 
 ## Layout
 
 ```
 app/
-├── Launcher.jar                  official backend          (you supply)
-├── blockpulse-launcher-ui.jar     front end + platform layer (build output)
+├── Launcher.jar                  official backend, unmodified (checked in)
+├── blockpulse-launcher-ui.jar     front end + platform layer   (checked in)
 └── profiles/                     modpack profile definitions
-launcher-ui/                      the JavaFX module (Maven)
-pom.xml                           parent POM (JDK 21, dependency management)
-build.sh                          build the UI jar and stage it into app/
+assets/                           badge, icon
 blockpulse-launcher               runtime wrapper
 install.sh                        installer / uninstaller
 ```
 
-`app/*.jar` is a build output or a supplied artifact and is not checked in.
-
-## Build
->Build.sh file are not in the repo (security issues)
-Requirements: JDK 21+, Maven 3.9+.
-
-```sh
-./build.sh
-```
-
-or directly:
-
-```sh
-mvn -DskipTests package
-```
-
-The jar lands in `launcher-ui/target/blockpulse-launcher-ui.jar` and is copied
-to `app/blockpulse-launcher-ui.jar`, where the wrapper and the installer pick it
-up.
-
-The build is **byte-reproducible**: the same source produces the same
-`blockpulse-launcher-ui.jar` on any machine, so a published hash is meaningful
-and the jar can be verified independently of whoever built it. The only
-dependency is JavaFX 21.0.12, which is not bundled — the wrapper locates it at
-runtime.
-
-Nothing here is signed. The official backend carries the publisher's own
-signature and must be obtained from them unmodified.
+There is nothing to build here. If you were looking for a source tree: this
+repository is the packaging and installation side of the port, not the code.
 
 ## Install and run
 
@@ -92,6 +94,12 @@ blockpulse-launcher --reset-graphics
 
 `install.sh` refuses to install anything if the two jars are missing and prints
 where to put them, rather than half-installing.
+
+Supported package managers: **pacman** (Arch-based), **apt-get** (Debian-based)
+and **dnf / dnf5 / microdnf** (Fedora, RHEL and their derivatives). The installer
+only ever installs packages from the distribution's own repositories — it never
+builds from source and never adds a third-party repository. If a package is
+missing from them, it explains the options and stops instead of guessing.
 
 ### Removing
 
@@ -208,7 +216,6 @@ AeroCraft FXML-independent UI shell smoke test passed.
 - **The reported version is still `0.6.2`** — the official
   `build-info.properties` is left untouched on purpose: bumping it would make
   the launcher demand an update it cannot install.
-    >build-info.properties file are not in the repo (security issues)
 - **The modpack update channel is authenticated only by TLS.** The manifest and
   the archive it names are fetched over the same connection, and the SHA-256
   used to check the archive comes from that same manifest, so the checksum is
@@ -242,45 +249,55 @@ AeroCraft FXML-independent UI shell smoke test passed.
   current head of an AUR repository and run the PKGBUILD it found there, which
   meant executing instructions fetched over the network at install time from a
   repository this project does not control.
-- **Not tested** Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
-- **Testing** Fedora
-  
+- **Fedora/RHEL support is newer than the rest and thinner than the rest.**
+  `install.sh` detects `dnf`/`dnf5`/`microdnf`, installs and records packages the
+  same way it does for Arch and Debian, and removes them with `dnf remove` +
+  `dnf autoremove`. JavaFX is found by asking `rpm` where `javafx.controls.jar`
+  actually landed, because Fedora 41+ ships it as the standalone `openjfx`
+  package in a `lib64` path that none of the fixed directories match. A first run
+  inside a Fedora 44 VM exposed three real bugs, all fixed: the installer named
+  a package that does not exist on Fedora, its JavaFX search never matched rpm's
+  output format, and the wrapper told every non-Debian system to run `pacman`.
+  Those fixes are verified against the real command output formats, but the
+  end-to-end run on Fedora has not been repeated yet.
+- **Not tested** on Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
+
 ## What is and is not in this repository
 
-Contains: the wrapper, the installer, the JavaFX front end and platform layer,
-and the modpack profiles. All original work, no decompiled code.
+Contains: the wrapper, the installer, the badge and icon, the modpack profile
+definitions, and both runtime jars.
 
 Does not contain, on purpose:
 
-- **The official backend jar.** Obtain it from the project's own release
-  channel. The launcher will not start without it and this project will not
-  mirror it.
-- **Decompiled sources of the official launcher.** The platform layer here was
-  written against the backend's public API surface, reached by reflection at
-  runtime. If you are the rights holder and want this taken down or
+- **Launcher source.** Neither jar is built from source here; the launcher
+  cannot be rebuilt from this repository.
+- **The platform layer's source.** `blockpulse-launcher-ui.jar` is checked in
+  as a binary; its Java sources are not part of this repository.
+- **Decompiled sources of the official launcher.** Nothing here was recovered
+  by decompiling it. If you are the rights holder and want this taken down or
   relicensed, open an issue.
 - **Any private key or credential.** The tree carries no signing key, no
-  keystore and no token; the build has no key material to leak and no key
-  generation step. The official backend's own update-signing key is a property
-  of the official binary — a key delivered to every client cannot be a secret,
-  and the only real fix is a server-side protocol change.
+  keystore and no token, and has no build step that could leak one. The official
+  backend's own update-signing key is a property of the official binary — a key
+  delivered to every client cannot be a secret, and the only real fix is a
+  server-side protocol change.
 
 ## Legal
 
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
-This repository is licensed under the GNU GPL v3; the text is in
-[`LICENSE`](LICENSE). It covers only the code in this repository, which is all
-original work. All trademarks and the game content belong to their respective
-owners.
+The code in this repository — the wrapper, the installer, the badge, the icon —
+is licensed under the MIT licence; the text is in [`LICENSE`](LICENSE). All
+trademarks and the game content belong to their respective owners.
 
-Two things here are *not* covered by it, because they are not ours:
+Two things here are *not* covered by it, because they are not ours and MIT
+cannot relicense somebody else's work:
 
-- `app/Launcher.jar` — not part of this repository, not redistributed by it.
-  Anyone redistributing the official artifacts should make sure they have the
-  rights to do so.
+- `app/Launcher.jar` — the official AeroCraft backend, included unmodified, not
+  patched. The official project's own terms govern it. If you are its rights
+  holder and want it gone, open an issue.
 - `app/profiles/*.json` — the modpack profile definitions as they ship in the
-  official distribution. Their terms are the project's.
+  official distribution. The project's terms govern those too.
 
 The official launcher's own EULA applied to the official build. It does not
 apply to this platform layer, which was written from scratch against the
