@@ -260,7 +260,16 @@ AeroCraft FXML-independent UI shell smoke test passed.
   output format, and the wrapper told every non-Debian system to run `pacman`.
   Those fixes are verified against the real command output formats, but the
   end-to-end run on Fedora has not been repeated yet.
-- **Not tested** on Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
+- **The Debian branch probes for a package instead of assuming one.**
+  `openjdk-21-jre` does not exist on Ubuntu 22.04, which the Mint 21 series is
+  built on, and Mint ships its own `msopenjdk-21` build. The installer asks
+  `apt-cache policy` for a real candidate and names whichever it finds;
+  when there is none it explains that a PPA is the user's decision rather than
+  adding one. JavaFX has the same treatment (`openjfx`, `libopenjfx-java`,
+  `openjfx-swt`). Note that `openjfx` on older releases is JavaFX 11 and will
+  not load on a Java 21 runtime — the wrapper's version-mismatch message covers
+  that case. This branch has not yet been exercised on a live Debian system.
+- **Not tested** on NixOS, SteamOS, macOS or BSD.
 
 ## What is and is not in this repository
 

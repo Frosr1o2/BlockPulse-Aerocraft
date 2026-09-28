@@ -159,10 +159,12 @@ missing_dependencies() {
             has secret-tool || DEP_MISSING+=(libsecret)
             ;;
         debian)
-            if ! java21_path >/dev/null 2>&1 && ! dpkg -s openjdk-21-jre >/dev/null 2>&1 && ! dpkg -s openjdk-21-jdk >/dev/null 2>&1; then
-                DEP_MISSING+=(openjdk-21-jre)
+            if ! java21_path >/dev/null 2>&1; then
+                DEP_MISSING+=("$(debian_java_package || printf '%s\n' openjdk-21-jre)")
             fi
-            javafx_path >/dev/null 2>&1 || DEP_MISSING+=(openjfx)
+            if ! javafx_path >/dev/null 2>&1; then
+                DEP_MISSING+=("$(debian_javafx_package || printf '%s\n' openjfx)")
+            fi
             has xdg-open || DEP_MISSING+=(xdg-utils)
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 dpkg -s xwayland >/dev/null 2>&1 || DEP_MISSING+=(xwayland)
@@ -246,8 +248,48 @@ install_fedora_javafx() {
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
     return 1
 }
+# Ubuntu 22.04 (and the Mint 21 series built on it) has no openjdk-21 at all,
+# and Mint ships its own msopenjdk build, so the package name has to be probed
+# rather than assumed. apt-cache prints "Candidate: (none)" for a known but
+# unavailable package and "Unable to locate package" for an unknown one, so
+# matching a real candidate is the reliable test.
+debian_package_available() {
+    dpkg -s "$1" >/dev/null 2>&1 && return 0
+    has apt-cache || return 1
+    apt-cache policy "$1" 2>/dev/null | grep -qE "^[[:space:]]*Candidate: [^(]"
+}
+debian_java_package() {
+    local pkg
+    for pkg in openjdk-21-jre msopenjdk-21 openjdk-21-jdk openjdk-21-jre-headless; do
+        debian_package_available "$pkg" && { printf '%s\n' "$pkg"; return 0; }
+    done
+    return 1
+}
+debian_javafx_package() {
+    local pkg
+    for pkg in openjfx libopenjfx-java openjfx-swt; do
+        debian_package_available "$pkg" && { printf '%s\n' "$pkg"; return 0; }
+    done
+    return 1
+}
+install_debian_javafx() {
+    local pkg
+    if pkg="$(debian_javafx_package)"; then
+        root_run apt-get install -y "$pkg"
+        record_package "$pkg"
+        return 0
+    fi
+    say ""
+    say "В репозиториях нет пакета с JavaFX, и установщик не подключает"
+    say "сторонние PPA: решение остаётся за пользователем."
+    say "Варианты:"
+    say "  * sudo apt-get install openjfx          (JavaFX 21 есть в Ubuntu 24.04 и новее)"
+    say "  * более свежий релиз Ubuntu/Mint, где openjfx совпадает с Java 21"
+    say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
+    return 1
+}
 install_dependencies() {
-    local manager="$1"
+    local manager="$1" java_pkg
     case "$manager" in
         arch)
             if ! pacman -Qq jdk21-openjdk >/dev/null 2>&1 && ! pacman -Qq jre21-openjdk >/dev/null 2>&1; then
@@ -276,13 +318,20 @@ install_dependencies() {
             ;;
         debian)
             root_run apt-get update
-            if ! dpkg -s openjdk-21-jre >/dev/null 2>&1 && ! dpkg -s openjdk-21-jdk >/dev/null 2>&1; then
-                root_run apt-get install -y openjdk-21-jre
-                record_package openjdk-21-jre
+            if ! java21_path >/dev/null 2>&1; then
+                if java_pkg="$(debian_java_package)"; then
+                    root_run apt-get install -y "$java_pkg"
+                    record_package "$java_pkg"
+                else
+                    say ""
+                    say "В репозиториях нет Java 21, и установщик не подключает"
+                    say "сторонние PPA. На Ubuntu 22.04 и Mint 21 его нет вовсе:"
+                    say "  * перейти на Ubuntu 24.04 / Mint 22 и новее"
+                    say "  * либо указать JAVA_HOME вручную (см. README)"
+                fi
             fi
-            if ! dpkg -s openjfx >/dev/null 2>&1; then
-                root_run apt-get install -y openjfx
-                record_package openjfx
+            if ! javafx_path >/dev/null 2>&1; then
+                install_debian_javafx || true
             fi
             if ! dpkg -s xdg-utils >/dev/null 2>&1; then
                 root_run apt-get install -y xdg-utils
