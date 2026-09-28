@@ -470,16 +470,14 @@ require_artifacts() {
     if [ "$missing" -ne 0 ]; then
         cat <<EOF_MISSING
 
-В этот репозиторий официальный билд не входит и не распространяется.
-Нужны два файла в app/:
-  Launcher.jar                 официальный бэкенд AeroCraft 0.6.2 (не собирается
-                               из этого репозитория, скачивается сам)
-  blockpulse-launcher-ui.jar   слой для Linux/macOS/BSD (релизный артефакт)
+Оба файла лежат в репозитории в app/. Похоже, копия неполная.
+Возьми их оттуда:
+  https://github.com/Frosr1o2/BlockPulse-Aerocraft
 
-Положить оба в:
+или положи оба файла в:
   $BASE_DIR/app/
 
-и запустить установку снова.
+и запусти установку снова.
 EOF_MISSING
         return 1
     fi

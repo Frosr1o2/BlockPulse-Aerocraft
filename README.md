@@ -12,48 +12,71 @@
 
 The official BlockPulse Aerocraft launcher ships as compiled jars for Windows
 only. This repository holds the **packaging** side of running it on Linux,
-macOS and BSD:
+macOS and BSD — the runtime wrapper, the installer, the modpack profiles and
+both jars, so a clone is ready to install:
 
 - `blockpulse-launcher` — a runtime wrapper that finds a Java 21 runtime and
   JavaFX, probes the renderers and starts the launcher;
 - `install.sh` — installer, uninstaller and package bookkeeping;
 - `app/profiles/` — the modpack profile definitions the launcher expects.
 
-**This repository contains no launcher source.** Neither the official backend
-nor the platform layer is published here: no decompiled code, and no build for
-either jar. Both artifacts are obtained separately, and the installer refuses to
-run without them.
+**This repository contains no launcher source.** No decompiled code is
+published here, and neither jar is built from source in this repository. Both
+artifacts are included as-is so that a clone is ready to install.
 
 If you came here to build the launcher from source, this is the wrong
 repository — there is nothing to build.
 
 ---
 
-## What you need first
+## Where to get the two jars
 
-| File | Where it comes from |
-|---|---|
-| `app/Launcher.jar` | the official AeroCraft 0.6.2 distribution. Not built here, not redistributed here |
-| `app/blockpulse-launcher-ui.jar` | the project's own release artifact. Not built here — the source is not published |
+Both jars are checked in, so a clone is ready to install. If you would rather
+download them directly:
 
-Drop both into `app/` before installing. The two jars are independent: the UI
-reaches the backend through reflection
-(`Class.forName("pro.gravit.launcher.core.api....")`), so they can be replaced
-separately, and neither is signed by this project.
+| File | Size | SHA-256 |
+|---|---|---|
+| [`app/Launcher.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/main/app/Launcher.jar) | 5962532 B | `44d8bdcd978302ee2bdcfdeb042d974fbf267d5abe93206fbf2435e392240fbb` |
+| [`app/blockpulse-launcher-ui.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/main/app/blockpulse-launcher-ui.jar) | 991708 B | `6bd3f5156dc34da109f4fd65b01a128f15b484d2abb60c9daa84bc30d7fcb92d` |
+
+`Launcher.jar` is the official AeroCraft 0.6.2 backend, taken from the official
+distribution and included here **unmodified** — it is not built from source, not
+patched, and its own terms apply to it. The launcher verifies its code-signing
+chain at startup, so an edited copy will not start; take it from the official
+project if you prefer their current build rather than the pinned one here.
+`blockpulse-launcher-ui.jar` is this project's own build and is unsigned.
+
+Verify what you have before installing:
+
+```sh
+cd app
+sha256sum -c <<'EOF'
+44d8bdcd978302ee2bdcfdeb042d974fbf267d5abe93206fbf2435e392240fbb  Launcher.jar
+6bd3f5156dc34da109f4fd65b01a128f15b484d2abb60c9daa84bc30d7fcb92d  blockpulse-launcher-ui.jar
+EOF
+```
+
+then
+
+```sh
+cd .. && ./install.sh
+```
+
+The two jars are independent — the UI reaches the backend through reflection
+(`Class.forName("pro.gravit.launcher.core.api....")`) — so either can be
+replaced on its own.
 
 ## Layout
 
 ```
 app/
-├── Launcher.jar                  official backend           (you supply)
-├── blockpulse-launcher-ui.jar     front end + platform layer (you supply)
+├── Launcher.jar                  official backend, unmodified (checked in)
+├── blockpulse-launcher-ui.jar     front end + platform layer   (checked in)
 └── profiles/                     modpack profile definitions
 assets/                           badge, icon
 blockpulse-launcher               runtime wrapper
 install.sh                        installer / uninstaller
 ```
-
-`app/*.jar` is a supplied artifact and is not checked in.
 
 There is nothing to build here. If you were looking for a source tree: this
 repository is the packaging and installation side of the port, not the code.
@@ -241,16 +264,15 @@ AeroCraft FXML-independent UI shell smoke test passed.
 
 ## What is and is not in this repository
 
-Contains: the wrapper, the installer, the badge and icon, and the modpack
-profile definitions.
+Contains: the wrapper, the installer, the badge and icon, the modpack profile
+definitions, and both runtime jars.
 
 Does not contain, on purpose:
 
-- **The official backend jar.** Obtain it from the project's own release
-  channel. The launcher will not start without it and this project will not
-  mirror it.
-- **The platform layer's source.** `blockpulse-launcher-ui.jar` ships as a
-  release artifact; its Java sources are not part of this repository.
+- **Launcher source.** Neither jar is built from source here; the launcher
+  cannot be rebuilt from this repository.
+- **The platform layer's source.** `blockpulse-launcher-ui.jar` is checked in
+  as a binary; its Java sources are not part of this repository.
 - **Decompiled sources of the official launcher.** Nothing here was recovered
   by decompiling it. If you are the rights holder and want this taken down or
   relicensed, open an issue.
@@ -271,9 +293,8 @@ owners.
 
 Two things here are *not* covered by it, because they are not ours:
 
-- `app/Launcher.jar` — not part of this repository, not redistributed by it.
-  Anyone redistributing the official artifacts should make sure they have the
-  rights to do so.
+- `app/Launcher.jar` — the official AeroCraft backend, included unmodified.
+  The official project's terms govern it.
 - `app/profiles/*.json` — the modpack profile definitions as they ship in the
   official distribution. Their terms are the project's.
 
