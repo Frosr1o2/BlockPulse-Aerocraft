@@ -100,7 +100,7 @@ javafx_path() {
     # rpm where the jar actually landed instead of guessing a path.
     if rpm_installed_any openjfx java-21-openjfx java-22-openjfx java-23-openjfx; then
         local found
-        found="$(rpm -qa 2>/dev/null | grep -iE '^(openjfx|java-[0-9]+-openjfx)$' \
+        found="$(rpm -qa --qf '%{NAME}\n' 2>/dev/null | grep -ixE 'openjfx|java-[0-9]+-openjfx' \
             | while IFS= read -r pkg; do rpm -ql "$pkg" 2>/dev/null; done \
             | awk -F/ '$NF == "javafx.controls.jar" {print $0}' | head -1)"
         if [ -n "$found" ] && [ -f "$found" ]; then
@@ -173,7 +173,11 @@ missing_dependencies() {
             if ! java21_path >/dev/null 2>&1 && ! rpm_installed_any java-21-openjdk java-21-openjdk-headless java-1.21.0-openjdk; then
                 DEP_MISSING+=(java-21-openjdk)
             fi
-            javafx_path >/dev/null 2>&1 || DEP_MISSING+=(java-21-openjfx)
+            if ! javafx_path >/dev/null 2>&1; then
+                # name the package dnf can actually install, not one that only
+                # exists in some other distribution
+                DEP_MISSING+=("$(fedora_javafx_package || printf '%s\n' openjfx)")
+            fi
             has xdg-open || DEP_MISSING+=(xdg-utils)
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 rpm_installed xorg-x11-server-Xwayland || DEP_MISSING+=(xorg-x11-server-Xwayland)
@@ -208,6 +212,18 @@ install_arch_javafx() {
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
     return 1
 }
+# Fedora ships JavaFX either as a per-JDK package or, from Fedora 41+, as a
+# standalone openjfx. Returns the name that is actually available so the
+# "missing dependency" message names a package dnf can install.
+fedora_javafx_package() {
+    local dnf pkg
+    dnf="$(dnf_cmd)"
+    for pkg in java-21-openjfx openjfx; do
+        rpm_installed "$pkg" && { printf '%s\n' "$pkg"; return 0; }
+        "$dnf" -q list --available "$pkg" >/dev/null 2>&1 && { printf '%s\n' "$pkg"; return 0; }
+    done
+    return 1
+}
 install_fedora_javafx() {
     local dnf pkg
     dnf="$(dnf_cmd)"
@@ -215,18 +231,17 @@ install_fedora_javafx() {
     # runtime. Nothing is built from source and nothing is pulled from a
     # third-party repository: if the matching package is missing, the user
     # chooses the path deliberately.
-    for pkg in java-21-openjfx openjfx; do
-        if rpm_installed "$pkg" || "$dnf" -q list --available "$pkg" >/dev/null 2>&1; then
-            root_run "$dnf" install -y "$pkg"
-            record_package "$pkg"
-            return 0
-        fi
-    done
+    if pkg="$(fedora_javafx_package)"; then
+        root_run "$dnf" install -y "$pkg"
+        record_package "$pkg"
+        return 0
+    fi
     say ""
     say "В репозиториях нет JavaFX для Java 21, и установщик не берёт его из"
     say "сторонних источников: подключать репозиторий — решение пользователя."
     say "Варианты:"
-    say "  * sudo dnf install java-21-openjfx   (обычно есть в fedora)"
+    say "  * sudo dnf install openjfx             (Fedora 41+, JavaFX отдельным пакетом)"
+    say "  * sudo dnf install java-21-openjfx     (Fedora 40 и старше, JavaFX на каждый JDK)"
     say "  * другой дистрибутив / репозиторий с JavaFX 21"
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
     return 1

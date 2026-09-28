@@ -226,13 +226,17 @@ AeroCraft FXML-independent UI shell smoke test passed.
   current head of an AUR repository and run the PKGBUILD it found there, which
   meant executing instructions fetched over the network at install time from a
   repository this project does not control.
-- **Fedora/RHEL is implemented but not run on real hardware.** `install.sh`
-  detects `dnf`/`dnf5`/`microdnf`, installs and records the packages the same way
-  it does for Arch and Debian, and removes them with `dnf remove` +
-  `dnf autoremove`. The branch was verified against a simulated Fedora host with
-  stubbed `dnf`/`rpm`/`sudo` — detection, the missing-dependency list, package
-  installation, the JavaFX path and the uninstall path — but nobody has run the
-  installer on an actual Fedora machine yet.
+- **Fedora/RHEL support is newer than the rest and thinner than the rest.**
+  `install.sh` detects `dnf`/`dnf5`/`microdnf`, installs and records packages the
+  same way it does for Arch and Debian, and removes them with `dnf remove` +
+  `dnf autoremove`. JavaFX is found by asking `rpm` where `javafx.controls.jar`
+  actually landed, because Fedora 41+ ships it as the standalone `openjfx`
+  package in a `lib64` path that none of the fixed directories match. A first run
+  inside a Fedora 44 VM exposed three real bugs, all fixed: the installer named
+  a package that does not exist on Fedora, its JavaFX search never matched rpm's
+  output format, and the wrapper told every non-Debian system to run `pacman`.
+  Those fixes are verified against the real command output formats, but the
+  end-to-end run on Fedora has not been repeated yet.
 - **Not tested** on Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
 
 ## What is and is not in this repository
@@ -261,7 +265,7 @@ Does not contain, on purpose:
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
 This repository is licensed under the GNU GPL v3; the text is in
-[`LICENCE`](LICENCE). It covers only the code in this repository, which is all
+[`LICENSE`](LICENSE). It covers only the code in this repository, which is all
 original work. All trademarks and the game content belong to their respective
 owners.
 

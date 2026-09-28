@@ -83,7 +83,7 @@ else
         # guessing a path does not survive lib64 and per-JDK packages.
         while IFS= read -r c; do
             [ -n "$c" ] && FX_CANDS+=("$(dirname "$c")")
-        done < <(rpm -qa 2>/dev/null | grep -iE '^(openjfx|java-[0-9]+-openjfx)$' \
+        done < <(rpm -qa --qf '%{NAME}\n' 2>/dev/null | grep -ixE 'openjfx|java-[0-9]+-openjfx' \
                  | while IFS= read -r pkg; do rpm -ql "$pkg" 2>/dev/null; done \
                  | awk -F/ '$NF == "javafx.controls.jar" {print}')
     fi
