@@ -212,6 +212,7 @@ install_arch_javafx() {
     say "  * Arch с multilib:  sudo pacman -S java21-openjfx   (обычно есть в extra)"
     say "  * другой дистрибутив / репозиторий с JavaFX 21"
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
+    debian_explain_missing "openjfx"
     return 1
 }
 # Fedora ships JavaFX either as a per-JDK package or, from Fedora 41+, as a
@@ -261,6 +262,30 @@ try_root_run() {
     say "Не удалось выполнить: $*"
     return 1
 }
+# A live session lists the installer CD-ROM in sources.list. apt-get update then
+# fails on it and writes no package lists at all, so every later apt-cache query
+# behaves as if nothing were installed. Filtering that one source out for the
+# duration of this command is enough: the system is not modified, the child
+# process simply does not see the broken entry.
+apt_update() {
+    local tmp rc
+    tmp="$(mktemp 2>/dev/null || true)"
+    if [ -n "$tmp" ]; then
+        { grep -rhvE '^[[:space:]]*deb(-src)?[[:space:]]+cdrom:' \
+                 /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true; } >"$tmp"
+    fi
+    if [ -n "$tmp" ] && [ -s "$tmp" ]; then
+        root_run apt-get update \
+            -o "Dir::Etc::sourcelist=$tmp" \
+            -o "Dir::Etc::sourceparts=/dev/null" \
+            -o "APT::Get::List-Cleanup=0"
+        rc=$?
+        rm -f "$tmp"
+        return $rc
+    fi
+    [ -n "$tmp" ] && rm -f "$tmp"
+    root_run apt-get update
+}
 # Ubuntu 22.04 (and the Mint 21 series built on it) has no openjdk-21 at all,
 # and Mint ships its own msopenjdk build, so the package name has to be probed
 # rather than assumed. apt-cache prints "Candidate: (none)" for a known but
@@ -269,7 +294,21 @@ try_root_run() {
 debian_package_available() {
     dpkg -s "$1" >/dev/null 2>&1 && return 0
     has apt-cache || return 1
-    apt-cache policy "$1" 2>/dev/null | grep -qE "^[[:space:]]*Candidate: [^(]"
+    # "policy" is the precise answer, "show" covers a cache state where policy
+    # prints no candidate line at all but the package is in the index.
+    apt-cache policy "$1" 2>/dev/null | grep -qE "^[[:space:]]*Candidate: [^(]" && return 0
+    apt-cache show "$1" >/dev/null 2>&1
+}
+# When nothing is found, the reason matters more than the verdict: on a live
+# session the package lists start out stale, and "no such package" and "no
+# candidate yet" look identical from the outside.
+debian_explain_missing() {
+    say ""
+    say "Что отвечает apt про первый кандидат ($1):"
+    if has apt-cache; then
+        apt-cache policy "$1" 2>&1 | sed -n '1,6p' | while IFS= read -r line; do say "  $line"; done
+        say "Файлы индексов: $(ls /var/lib/apt/lists/*Packages* 2>/dev/null | wc -l)"
+    fi
 }
 debian_java_package() {
     local pkg
@@ -328,11 +367,11 @@ install_dependencies() {
             fi
             ;;
         debian)
-            if ! root_run apt-get update; then
+            if ! apt_update; then
                 say ""
-                say "apt-get update завершился с ошибкой. На live-системе это"
-                say "обычно источник с установочного CD-ROM, который не является"
-                say "репозиторием. Пробую поставить с текущими индексами."
+                say "apt-get update завершился с ошибкой даже без CD-источника."
+                say "Пробую поставить с текущими индексами; если пакет не найден,"
+                say "ниже будет показано, что отвечает про него apt."
             fi
             if ! java21_path >/dev/null 2>&1; then
                 if java_pkg="$(debian_java_package)"; then
@@ -343,6 +382,7 @@ install_dependencies() {
                     say "сторонние PPA. На Ubuntu 22.04 и Mint 21 его нет вовсе:"
                     say "  * перейти на Ubuntu 24.04 / Mint 22 и новее"
                     say "  * либо указать JAVA_HOME вручную (см. README)"
+                    debian_explain_missing "openjdk-21-jre"
                 fi
             fi
             if ! javafx_path >/dev/null 2>&1; then

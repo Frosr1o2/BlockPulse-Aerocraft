@@ -273,7 +273,22 @@ AeroCraft FXML-independent UI shell smoke test passed.
   probing correct but also showed that a failing `apt-get update` — the usual
   cause being the installer CD-ROM in a live session's sources — used to kill
   the installer with no message at all. Package manager failures are now
-  reported per command and the run continues.
+  reported per command and the run continues, and the package probe falls back
+  to `apt-cache show` when `apt-cache policy` reports no candidate, which is
+  what a live session does before its lists are populated. That case is now
+  handled at the source: `apt_update` builds a temporary source list with the
+  `deb cdrom:` entry removed and updates through that, so the live ISO's
+  installer disc cannot stop the package lists from being written, while the
+  system's own `sources.list` is left untouched. When a package still cannot be
+  found the installer prints what `apt-cache` answers instead of only asserting
+  that nothing is available. Still open: on the last run neither `openjdk-21-jre`
+  nor `openjfx` was installed, so Java 21 and JavaFX remain unproven on a live
+  system.
+
+> **Installing from a live session does not persist.** The live ISO runs in RAM,
+> so `/home`, the launcher and the installed packages are gone on reboot. Use it
+> to test the installer, then install again from a real system — or install the
+> distribution to disk first. The same applies to a live USB stick.
 - **Not tested** on NixOS, SteamOS, macOS or BSD.
 
 ## What is and is not in this repository
