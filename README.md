@@ -261,7 +261,41 @@ AeroCraft FXML-independent UI shell smoke test passed.
   output format, and the wrapper told every non-Debian system to run `pacman`.
   Those fixes are verified against the real command output formats, but the
   end-to-end run on Fedora has not been repeated yet.
-- **Not tested** on Debian/Ubuntu, NixOS, SteamOS, macOS or BSD.
+- **The Debian branch probes for a package instead of assuming one.**
+  `openjdk-21-jre` does not exist on Ubuntu 22.04, which the Mint 21 series is
+  built on, and Mint ships its own `msopenjdk-21` build. The installer asks
+  `apt-cache policy` for a real candidate and names whichever it finds;
+  when there is none it explains that a PPA is the user's decision rather than
+  adding one. JavaFX has the same treatment (`openjfx`, `libopenjfx-java`,
+  `openjfx-swt`). Note that `openjfx` on older releases is JavaFX 11 and will
+  not load on a Java 21 runtime — the wrapper's version-mismatch message covers
+  that case. A first run inside a Linux Mint 22.3 live session found the package
+  probing correct but also showed that a failing `apt-get update` — the usual
+  cause being the installer CD-ROM in a live session's sources — used to kill
+  the installer with no message at all. Package manager failures are now
+  reported per command and the run continues, and the package probe falls back
+  to `apt-cache show` when `apt-cache policy` reports no candidate, which is
+  what a live session does before its lists are populated. That case is now
+  handled at the source: `apt_update` builds a temporary source list with the
+  `deb cdrom:` entry removed and updates through that, so the live ISO's
+  installer disc cannot stop the package lists from being written, while the
+  system's own `sources.list` is left untouched. When a package still cannot be
+  found the installer prints what `apt-cache` answers instead of only asserting
+  that nothing is available. A live Mint 22.3 run then installed `openjdk-21-jre`
+  and `openjfx` successfully — the Debian path works — but exposed the next
+  problem: **Ubuntu 24.04 and Mint 22 package JavaFX as version 11**, while the
+  launcher is built against JavaFX 21. The installer used to print
+  "Java/JavaFX: готово" whenever a jar with the right name existed, which was
+  simply false. It now resolves the module and reports the version, warning when
+  it is older than 21. Getting JavaFX 21 on Ubuntu 24.04 means a distribution
+  that has it (Debian 13 and newer) or SDKMAN/coursier; the installer will not
+  add a PPA on its own.
+
+> **Installing from a live session does not persist.** The live ISO runs in RAM,
+> so `/home`, the launcher and the installed packages are gone on reboot. Use it
+> to test the installer, then install again from a real system — or install the
+> distribution to disk first. The same applies to a live USB stick.
+- **Not tested** on NixOS, SteamOS, macOS or BSD.
 
 ## What is and is not in this repository
 

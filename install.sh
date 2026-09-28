@@ -159,10 +159,12 @@ missing_dependencies() {
             has secret-tool || DEP_MISSING+=(libsecret)
             ;;
         debian)
-            if ! java21_path >/dev/null 2>&1 && ! dpkg -s openjdk-21-jre >/dev/null 2>&1 && ! dpkg -s openjdk-21-jdk >/dev/null 2>&1; then
-                DEP_MISSING+=(openjdk-21-jre)
+            if ! java21_path >/dev/null 2>&1; then
+                DEP_MISSING+=("$(debian_java_package || printf '%s\n' openjdk-21-jre)")
             fi
-            javafx_path >/dev/null 2>&1 || DEP_MISSING+=(openjfx)
+            if ! javafx_path >/dev/null 2>&1; then
+                DEP_MISSING+=("$(debian_javafx_package || printf '%s\n' openjfx)")
+            fi
             has xdg-open || DEP_MISSING+=(xdg-utils)
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 dpkg -s xwayland >/dev/null 2>&1 || DEP_MISSING+=(xwayland)
@@ -188,7 +190,7 @@ missing_dependencies() {
 }
 install_arch_javafx() {
     if pacman -Si java21-openjfx >/dev/null 2>&1; then
-        root_run pacman -S --needed --noconfirm java21-openjfx
+        try_root_run pacman -S --needed --noconfirm java21-openjfx
         return 0
     fi
     if has paru; then
@@ -210,6 +212,7 @@ install_arch_javafx() {
     say "  * Arch с multilib:  sudo pacman -S java21-openjfx   (обычно есть в extra)"
     say "  * другой дистрибутив / репозиторий с JavaFX 21"
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
+    debian_explain_missing "openjfx"
     return 1
 }
 # Fedora ships JavaFX either as a per-JDK package or, from Fedora 41+, as a
@@ -232,7 +235,9 @@ install_fedora_javafx() {
     # third-party repository: if the matching package is missing, the user
     # chooses the path deliberately.
     if pkg="$(fedora_javafx_package)"; then
-        root_run "$dnf" install -y "$pkg"
+        if ! try_root_run "$dnf" install -y "$pkg"; then
+            return 1
+        fi
         record_package "$pkg"
         return 0
     fi
@@ -246,17 +251,155 @@ install_fedora_javafx() {
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
     return 1
 }
+# A package manager that fails must not take the whole installer down: under
+# `set -e` a non-zero exit killed the script with no message at all, so the user
+# never learned that a single broken source or package was the cause.
+# "JavaFX: готово" used to mean "a jar with that name exists". On Ubuntu 24.04
+# the distro package is JavaFX 11, which is not what the launcher was built
+# against, so the check now resolves the module and reports its version.
+javafx_status() {
+    local java_path fx_dir line version major
+    java_path="$(java21_path 2>/dev/null || true)"
+    if [ -z "$java_path" ]; then
+        printf '%s
+' "нет Java 21"
+        return 1
+    fi
+    fx_dir="$(javafx_path 2>/dev/null || true)"
+    if [ -z "$fx_dir" ]; then
+        printf '%s
+' "нет JavaFX"
+        return 1
+    fi
+    if [ "$fx_dir" = bundled ]; then
+        line="$("$java_path" --list-modules 2>/dev/null | grep -E '^javafx\.controls@' | head -1)"
+    else
+        # Only the javafx jars: the same directory also holds jrt-fs.jar, which
+        # collides with the jrt.fs module of the JDK itself and makes the boot
+        # layer fail to initialise.
+        fx_path=""
+        for jar in "$fx_dir"/javafx.*.jar; do
+            [ -f "$jar" ] || continue
+            case "$jar" in
+                */javafx.base.jar|*/javafx.controls.jar|*/javafx.fxml.jar|*/javafx.graphics.jar|*/javafx.media.jar|*/javafx.swing.jar|*/javafx.web.jar)
+                    fx_path="${fx_path:+$fx_path:}$jar"
+                    ;;
+            esac
+        done
+        if [ -n "$fx_path" ]; then
+            line="$("$java_path" --module-path "$fx_path" --describe-module javafx.controls 2>/dev/null | head -1)"
+        fi
+    fi
+    [ -n "$line" ] || { printf '%s
+' "JavaFX не загружается этой средой"; return 1; }
+    version="$(printf '%s\n' "$line" | sed -n 's/.*@\([0-9][0-9.]*\).*/\1/p')"
+    [ -n "$version" ] || version="неизвестна"
+    major="$(printf '%s\n' "$version" | cut -d. -f1)"
+    case "$major" in
+        ''|*[!0-9]*) ;;
+        *) [ "$major" -ge 21 ] 2>/dev/null && { printf 'JavaFX %s\n' "$version"; return 0; } ;;
+    esac
+    printf 'JavaFX %s (нужен 21 или новее)\n' "$version"
+    return 1
+}
+try_root_run() {
+    if root_run "$@"; then
+        return 0
+    fi
+    say ""
+    say "Не удалось выполнить: $*"
+    return 1
+}
+# A live session lists the installer CD-ROM in sources.list. apt-get update then
+# fails on it and writes no package lists at all, so every later apt-cache query
+# behaves as if nothing were installed. Filtering that one source out for the
+# duration of this command is enough: the system is not modified, the child
+# process simply does not see the broken entry.
+apt_update() {
+    local tmp rc
+    tmp="$(mktemp 2>/dev/null || true)"
+    if [ -n "$tmp" ]; then
+        { grep -rhvE '^[[:space:]]*deb(-src)?[[:space:]]+cdrom:' \
+                 /etc/apt/sources.list /etc/apt/sources.list.d/ 2>/dev/null || true; } >"$tmp"
+    fi
+    if [ -n "$tmp" ] && [ -s "$tmp" ]; then
+        root_run apt-get update \
+            -o "Dir::Etc::sourcelist=$tmp" \
+            -o "Dir::Etc::sourceparts=/dev/null" \
+            -o "APT::Get::List-Cleanup=0"
+        rc=$?
+        rm -f "$tmp"
+        return $rc
+    fi
+    [ -n "$tmp" ] && rm -f "$tmp"
+    root_run apt-get update
+}
+# Ubuntu 22.04 (and the Mint 21 series built on it) has no openjdk-21 at all,
+# and Mint ships its own msopenjdk build, so the package name has to be probed
+# rather than assumed. apt-cache prints "Candidate: (none)" for a known but
+# unavailable package and "Unable to locate package" for an unknown one, so
+# matching a real candidate is the reliable test.
+debian_package_available() {
+    dpkg -s "$1" >/dev/null 2>&1 && return 0
+    has apt-cache || return 1
+    # "policy" is the precise answer, "show" covers a cache state where policy
+    # prints no candidate line at all but the package is in the index.
+    apt-cache policy "$1" 2>/dev/null | grep -qE "^[[:space:]]*Candidate: [^(]" && return 0
+    apt-cache show "$1" >/dev/null 2>&1
+}
+# When nothing is found, the reason matters more than the verdict: on a live
+# session the package lists start out stale, and "no such package" and "no
+# candidate yet" look identical from the outside.
+debian_explain_missing() {
+    say ""
+    say "Что отвечает apt про первый кандидат ($1):"
+    if has apt-cache; then
+        apt-cache policy "$1" 2>&1 | sed -n '1,6p' | while IFS= read -r line; do say "  $line"; done
+        say "Файлы индексов: $(ls /var/lib/apt/lists/*Packages* 2>/dev/null | wc -l)"
+    fi
+}
+debian_java_package() {
+    local pkg
+    for pkg in openjdk-21-jre msopenjdk-21 openjdk-21-jdk openjdk-21-jre-headless; do
+        debian_package_available "$pkg" && { printf '%s\n' "$pkg"; return 0; }
+    done
+    return 1
+}
+debian_javafx_package() {
+    local pkg
+    for pkg in openjfx libopenjfx-java openjfx-swt; do
+        debian_package_available "$pkg" && { printf '%s\n' "$pkg"; return 0; }
+    done
+    return 1
+}
+install_debian_javafx() {
+    local pkg
+    if pkg="$(debian_javafx_package)"; then
+        if ! try_root_run apt-get install -y "$pkg"; then
+            return 1
+        fi
+        record_package "$pkg"
+        return 0
+    fi
+    say ""
+    say "В репозиториях нет пакета с JavaFX, и установщик не подключает"
+    say "сторонние PPA: решение остаётся за пользователем."
+    say "Варианты:"
+    say "  * sudo apt-get install openjfx"
+    say "    (!) В Ubuntu 24.04 и Mint 22 этот пакет — JavaFX 11, сборке нужен 21."
+    say "      JavaFX 21 есть в Debian 13 и новее, либо его ставят через SDKMAN/coursier."
+    say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
+    return 1
+}
 install_dependencies() {
-    local manager="$1"
+    local manager="$1" java_pkg
     case "$manager" in
         arch)
             if ! pacman -Qq jdk21-openjdk >/dev/null 2>&1 && ! pacman -Qq jre21-openjdk >/dev/null 2>&1; then
-                root_run pacman -S --needed --noconfirm jdk21-openjdk
-                record_package jdk21-openjdk
+                try_root_run pacman -S --needed --noconfirm jdk21-openjdk && record_package jdk21-openjdk
             fi
             if ! pacman -Qq xdg-utils >/dev/null 2>&1; then
-                root_run pacman -S --needed --noconfirm xdg-utils
-                record_package xdg-utils
+                try_root_run pacman -S --needed --noconfirm xdg-utils && record_package xdg-utils
             fi
             if ! javafx_path >/dev/null 2>&1; then
                 # || true: под 'set -e' непустой return оборвал бы установку до
@@ -265,61 +408,64 @@ install_dependencies() {
             fi
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 if ! pacman -Qq xorg-xwayland >/dev/null 2>&1; then
-                    root_run pacman -S --needed --noconfirm xorg-xwayland
-                    record_package xorg-xwayland
+                    try_root_run pacman -S --needed --noconfirm xorg-xwayland && record_package xorg-xwayland
                 fi
             fi
             if ! pacman -Qq libsecret >/dev/null 2>&1; then
-                root_run pacman -S --needed --noconfirm libsecret
-                record_package libsecret
+                try_root_run pacman -S --needed --noconfirm libsecret && record_package libsecret
             fi
             ;;
         debian)
-            root_run apt-get update
-            if ! dpkg -s openjdk-21-jre >/dev/null 2>&1 && ! dpkg -s openjdk-21-jdk >/dev/null 2>&1; then
-                root_run apt-get install -y openjdk-21-jre
-                record_package openjdk-21-jre
+            if ! apt_update; then
+                say ""
+                say "apt-get update завершился с ошибкой даже без CD-источника."
+                say "Пробую поставить с текущими индексами; если пакет не найден,"
+                say "ниже будет показано, что отвечает про него apt."
             fi
-            if ! dpkg -s openjfx >/dev/null 2>&1; then
-                root_run apt-get install -y openjfx
-                record_package openjfx
+            if ! java21_path >/dev/null 2>&1; then
+                if java_pkg="$(debian_java_package)"; then
+                    try_root_run apt-get install -y "$java_pkg" && record_package "$java_pkg"
+                else
+                    say ""
+                    say "В репозиториях нет Java 21, и установщик не подключает"
+                    say "сторонние PPA. На Ubuntu 22.04 и Mint 21 его нет вовсе:"
+                    say "  * перейти на Ubuntu 24.04 / Mint 22 и новее"
+                    say "  * либо указать JAVA_HOME вручную (см. README)"
+                    debian_explain_missing "openjdk-21-jre"
+                fi
+            fi
+            if ! javafx_path >/dev/null 2>&1; then
+                install_debian_javafx || true
             fi
             if ! dpkg -s xdg-utils >/dev/null 2>&1; then
-                root_run apt-get install -y xdg-utils
-                record_package xdg-utils
+                try_root_run apt-get install -y xdg-utils && record_package xdg-utils
             fi
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 if ! dpkg -s xwayland >/dev/null 2>&1; then
-                    root_run apt-get install -y xwayland
-                    record_package xwayland
+                    try_root_run apt-get install -y xwayland && record_package xwayland
                 fi
             fi
             if ! dpkg -s libsecret-tools >/dev/null 2>&1; then
-                root_run apt-get install -y libsecret-tools
-                record_package libsecret-tools
+                try_root_run apt-get install -y libsecret-tools && record_package libsecret-tools
             fi
             ;;
         fedora)
             local dnf
             dnf="$(dnf_cmd)"
             if ! java21_path >/dev/null 2>&1 && ! rpm_installed_any java-21-openjdk java-21-openjdk-headless java-1.21.0-openjdk; then
-                root_run "$dnf" install -y java-21-openjdk
-                record_package java-21-openjdk
+                try_root_run "$dnf" install -y java-21-openjdk && record_package java-21-openjdk
             fi
             if ! javafx_path >/dev/null 2>&1; then
                 install_fedora_javafx || true
             fi
             if ! has xdg-open && ! rpm_installed xdg-utils; then
-                root_run "$dnf" install -y xdg-utils
-                record_package xdg-utils
+                try_root_run "$dnf" install -y xdg-utils && record_package xdg-utils
             fi
             if { [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; } && ! rpm_installed xorg-x11-server-Xwayland; then
-                root_run "$dnf" install -y xorg-x11-server-Xwayland
-                record_package xorg-x11-server-Xwayland
+                try_root_run "$dnf" install -y xorg-x11-server-Xwayland && record_package xorg-x11-server-Xwayland
             fi
             if ! has secret-tool && ! rpm_installed libsecret; then
-                root_run "$dnf" install -y libsecret
-                record_package libsecret
+                try_root_run "$dnf" install -y libsecret && record_package libsecret
             fi
             ;;
     esac
@@ -511,11 +657,25 @@ install_launcher() {
     fi
     say "Установлено: $INSTALL_DIR"
     say "Версия: $VERSION"
-    if java21_path >/dev/null 2>&1 && javafx_path >/dev/null 2>&1; then
-        say "Java/JavaFX: готово"
+    javafx_note=""
+    if javafx_status >/tmp/.blockpulse-javafx-status 2>/dev/null; then
+        javafx_note="Java/JavaFX: готово — $(cat /tmp/.blockpulse-javafx-status)"
     else
-        say "Java/JavaFX: не все зависимости доступны"
+        javafx_note="Java/JavaFX: $(cat /tmp/.blockpulse-javafx-status 2>/dev/null || echo 'не готово')"
     fi
+    rm -f /tmp/.blockpulse-javafx-status
+    say "$javafx_note"
+    case "$javafx_note" in
+        *"нужен 21"*)
+            say ""
+            say "Пакет JavaFX в этом дистрибутиве старее, чем требует сборка."
+            say "Установщик не подключает сторонние PPA: решение за вами."
+            say "Варианты:"
+            say "  * дистрибутив с JavaFX 21 (Debian 13 и новее)"
+            say "  * SDKMAN или coursier: готовый JavaFX 21 рядом с Java 21"
+            say "  * ./blockpulse-launcher --diagnose - покажет, грузится ли модуль"
+            ;;
+    esac
     if [ -L "$LINK_FILE" ]; then
         say "Команда: $LINK_FILE"
     fi
