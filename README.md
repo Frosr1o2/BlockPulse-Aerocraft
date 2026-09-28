@@ -73,13 +73,14 @@ app/
 ├── Launcher.jar                  official backend, unmodified (checked in)
 ├── blockpulse-launcher-ui.jar     front end + platform layer   (checked in)
 └── profiles/                     modpack profile definitions
-assets/                           badge, icon
+assets/unofficial-badge.svg       the "unofficial" badge shown above
 blockpulse-launcher               runtime wrapper
+blockpulse-launcher.png           launcher icon
 install.sh                        installer / uninstaller
 ```
 
-There is nothing to build here. If you were looking for a source tree: this
-repository is the packaging and installation side of the port, not the code.
+If you were looking for a source tree: this repository is the packaging and
+installation side of the port, not the code.
 
 ## Install and run
 
