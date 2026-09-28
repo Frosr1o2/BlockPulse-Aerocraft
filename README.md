@@ -85,13 +85,15 @@ installation side of the port, not the code.
 ## Install and run
 
 ```sh
-./install.sh                  # install into ~/.local/share/BlockPulse
-./install.sh --uninstall      # remove the launcher, the game, settings and logs
-./install.sh --uninstall --keep-game
-blockpulse-launcher           # run
+./install.sh                          # install into ~/.local/share/BlockPulse
+./install.sh --uninstall              # remove the launcher, the game, settings and logs
+./install.sh --uninstall --keep-game  # the same, but keep Minecraft
+./install.sh --uninstall-all          # also remove the packages the installer added
+./install.sh --debug                  # verbose: what the package manager answered
+
+blockpulse-launcher                   # run
 blockpulse-launcher --diagnose
 blockpulse-launcher --reset-graphics
-./install.sh --debug            # installer says what the package manager answered
 ```
 
 `install.sh` refuses to install anything if the two jars are missing and prints
@@ -188,13 +190,24 @@ signed module — this port starts the front end directly instead.
 ## Diagnostics
 
 ```sh
-./blockpulse-launcher --diagnose
+./blockpulse-launcher --diagnose    # java, javafx, renderers, natives
+./install.sh --debug                # installer: what apt/dnf/pacman answered
 ```
+
+`--debug` is only interesting when the installer says a package is missing. It
+prints the candidate list it probed and what the package manager reports, which
+distinguishes "no such package in this release" from "the package lists have
+not been populated yet".
 
 The smoke test is in the UI jar and runs headless:
 
+On Arch the JavaFX jars sit inside the JDK, so the path below is right as is.
+On Debian and Fedora they are a separate package: run
+`./blockpulse-launcher --diagnose` first and take the directory it prints under
+"javafx lib dirs found" (on Debian that is usually `/usr/share/openjfx/lib`).
+
 ```sh
-FX=/usr/lib/jvm/java-21-openjdk/lib
+FX=/usr/lib/jvm/java-21-openjdk/lib     # Arch
 java -Djava.awt.headless=true \
      --module-path "$(ls $FX/javafx.*.jar | tr '\n' ':')" \
      --add-modules javafx.controls,javafx.graphics \
