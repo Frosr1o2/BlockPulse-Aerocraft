@@ -36,8 +36,8 @@ download them directly:
 
 | File | Size | SHA-256 |
 |---|---|---|
-| [`app/Launcher.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/main/app/Launcher.jar) | 5962532 B | `44d8bdcd978302ee2bdcfdeb042d974fbf267d5abe93206fbf2435e392240fbb` |
-| [`app/blockpulse-launcher-ui.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/main/app/blockpulse-launcher-ui.jar) | 991708 B | `6bd3f5156dc34da109f4fd65b01a128f15b484d2abb60c9daa84bc30d7fcb92d` |
+| [`app/Launcher.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/HEAD/app/Launcher.jar) | 5962532 B | `44d8bdcd978302ee2bdcfdeb042d974fbf267d5abe93206fbf2435e392240fbb` |
+| [`app/blockpulse-launcher-ui.jar`](https://github.com/Frosr1o2/BlockPulse-Aerocraft/raw/HEAD/app/blockpulse-launcher-ui.jar) | 991708 B | `6bd3f5156dc34da109f4fd65b01a128f15b484d2abb60c9daa84bc30d7fcb92d` |
 
 `Launcher.jar` is the official AeroCraft 0.6.2 backend, taken from the official
 distribution and included here **unmodified** — it is not built from source, not
@@ -286,17 +286,18 @@ Does not contain, on purpose:
 
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
-This repository is licensed under the GNU GPL v3; the text is in
-[`LICENSE`](LICENSE). It covers only the code in this repository, which is all
-original work. All trademarks and the game content belong to their respective
-owners.
+The code in this repository — the wrapper, the installer, the badge, the icon —
+is licensed under the MIT licence; the text is in [`LICENSE`](LICENSE). All
+trademarks and the game content belong to their respective owners.
 
-Two things here are *not* covered by it, because they are not ours:
+Two things here are *not* covered by it, because they are not ours and MIT
+cannot relicense somebody else's work:
 
-- `app/Launcher.jar` — the official AeroCraft backend, included unmodified.
-  The official project's terms govern it.
+- `app/Launcher.jar` — the official AeroCraft backend, included unmodified, not
+  patched. The official project's own terms govern it. If you are its rights
+  holder and want it gone, open an issue.
 - `app/profiles/*.json` — the modpack profile definitions as they ship in the
-  official distribution. Their terms are the project's.
+  official distribution. The project's terms govern those too.
 
 The official launcher's own EULA applied to the official build. It does not
 apply to this platform layer, which was written from scratch against the
