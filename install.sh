@@ -190,7 +190,7 @@ missing_dependencies() {
 }
 install_arch_javafx() {
     if pacman -Si java21-openjfx >/dev/null 2>&1; then
-        root_run pacman -S --needed --noconfirm java21-openjfx
+        try_root_run pacman -S --needed --noconfirm java21-openjfx
         return 0
     fi
     if has paru; then
@@ -234,7 +234,9 @@ install_fedora_javafx() {
     # third-party repository: if the matching package is missing, the user
     # chooses the path deliberately.
     if pkg="$(fedora_javafx_package)"; then
-        root_run "$dnf" install -y "$pkg"
+        if ! try_root_run "$dnf" install -y "$pkg"; then
+            return 1
+        fi
         record_package "$pkg"
         return 0
     fi
@@ -246,6 +248,17 @@ install_fedora_javafx() {
     say "  * sudo dnf install java-21-openjfx     (Fedora 40 и старше, JavaFX на каждый JDK)"
     say "  * другой дистрибутив / репозиторий с JavaFX 21"
     say "  * указать JAVA_HOME и JAVAFX_LIB вручную (см. README)"
+    return 1
+}
+# A package manager that fails must not take the whole installer down: under
+# `set -e` a non-zero exit killed the script with no message at all, so the user
+# never learned that a single broken source or package was the cause.
+try_root_run() {
+    if root_run "$@"; then
+        return 0
+    fi
+    say ""
+    say "Не удалось выполнить: $*"
     return 1
 }
 # Ubuntu 22.04 (and the Mint 21 series built on it) has no openjdk-21 at all,
@@ -275,7 +288,9 @@ debian_javafx_package() {
 install_debian_javafx() {
     local pkg
     if pkg="$(debian_javafx_package)"; then
-        root_run apt-get install -y "$pkg"
+        if ! try_root_run apt-get install -y "$pkg"; then
+            return 1
+        fi
         record_package "$pkg"
         return 0
     fi
@@ -293,12 +308,10 @@ install_dependencies() {
     case "$manager" in
         arch)
             if ! pacman -Qq jdk21-openjdk >/dev/null 2>&1 && ! pacman -Qq jre21-openjdk >/dev/null 2>&1; then
-                root_run pacman -S --needed --noconfirm jdk21-openjdk
-                record_package jdk21-openjdk
+                try_root_run pacman -S --needed --noconfirm jdk21-openjdk && record_package jdk21-openjdk
             fi
             if ! pacman -Qq xdg-utils >/dev/null 2>&1; then
-                root_run pacman -S --needed --noconfirm xdg-utils
-                record_package xdg-utils
+                try_root_run pacman -S --needed --noconfirm xdg-utils && record_package xdg-utils
             fi
             if ! javafx_path >/dev/null 2>&1; then
                 # || true: под 'set -e' непустой return оборвал бы установку до
@@ -307,21 +320,23 @@ install_dependencies() {
             fi
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 if ! pacman -Qq xorg-xwayland >/dev/null 2>&1; then
-                    root_run pacman -S --needed --noconfirm xorg-xwayland
-                    record_package xorg-xwayland
+                    try_root_run pacman -S --needed --noconfirm xorg-xwayland && record_package xorg-xwayland
                 fi
             fi
             if ! pacman -Qq libsecret >/dev/null 2>&1; then
-                root_run pacman -S --needed --noconfirm libsecret
-                record_package libsecret
+                try_root_run pacman -S --needed --noconfirm libsecret && record_package libsecret
             fi
             ;;
         debian)
-            root_run apt-get update
+            if ! root_run apt-get update; then
+                say ""
+                say "apt-get update завершился с ошибкой. На live-системе это"
+                say "обычно источник с установочного CD-ROM, который не является"
+                say "репозиторием. Пробую поставить с текущими индексами."
+            fi
             if ! java21_path >/dev/null 2>&1; then
                 if java_pkg="$(debian_java_package)"; then
-                    root_run apt-get install -y "$java_pkg"
-                    record_package "$java_pkg"
+                    try_root_run apt-get install -y "$java_pkg" && record_package "$java_pkg"
                 else
                     say ""
                     say "В репозиториях нет Java 21, и установщик не подключает"
@@ -334,41 +349,34 @@ install_dependencies() {
                 install_debian_javafx || true
             fi
             if ! dpkg -s xdg-utils >/dev/null 2>&1; then
-                root_run apt-get install -y xdg-utils
-                record_package xdg-utils
+                try_root_run apt-get install -y xdg-utils && record_package xdg-utils
             fi
             if [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
                 if ! dpkg -s xwayland >/dev/null 2>&1; then
-                    root_run apt-get install -y xwayland
-                    record_package xwayland
+                    try_root_run apt-get install -y xwayland && record_package xwayland
                 fi
             fi
             if ! dpkg -s libsecret-tools >/dev/null 2>&1; then
-                root_run apt-get install -y libsecret-tools
-                record_package libsecret-tools
+                try_root_run apt-get install -y libsecret-tools && record_package libsecret-tools
             fi
             ;;
         fedora)
             local dnf
             dnf="$(dnf_cmd)"
             if ! java21_path >/dev/null 2>&1 && ! rpm_installed_any java-21-openjdk java-21-openjdk-headless java-1.21.0-openjdk; then
-                root_run "$dnf" install -y java-21-openjdk
-                record_package java-21-openjdk
+                try_root_run "$dnf" install -y java-21-openjdk && record_package java-21-openjdk
             fi
             if ! javafx_path >/dev/null 2>&1; then
                 install_fedora_javafx || true
             fi
             if ! has xdg-open && ! rpm_installed xdg-utils; then
-                root_run "$dnf" install -y xdg-utils
-                record_package xdg-utils
+                try_root_run "$dnf" install -y xdg-utils && record_package xdg-utils
             fi
             if { [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; } && ! rpm_installed xorg-x11-server-Xwayland; then
-                root_run "$dnf" install -y xorg-x11-server-Xwayland
-                record_package xorg-x11-server-Xwayland
+                try_root_run "$dnf" install -y xorg-x11-server-Xwayland && record_package xorg-x11-server-Xwayland
             fi
             if ! has secret-tool && ! rpm_installed libsecret; then
-                root_run "$dnf" install -y libsecret
-                record_package libsecret
+                try_root_run "$dnf" install -y libsecret && record_package libsecret
             fi
             ;;
     esac

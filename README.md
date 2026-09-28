@@ -73,13 +73,14 @@ app/
 ├── Launcher.jar                  official backend, unmodified (checked in)
 ├── blockpulse-launcher-ui.jar     front end + platform layer   (checked in)
 └── profiles/                     modpack profile definitions
-assets/                           badge, icon
+assets/unofficial-badge.svg       the "unofficial" badge shown above
 blockpulse-launcher               runtime wrapper
+blockpulse-launcher.png           launcher icon
 install.sh                        installer / uninstaller
 ```
 
-There is nothing to build here. If you were looking for a source tree: this
-repository is the packaging and installation side of the port, not the code.
+If you were looking for a source tree: this repository is the packaging and
+installation side of the port, not the code.
 
 ## Install and run
 
@@ -268,7 +269,11 @@ AeroCraft FXML-independent UI shell smoke test passed.
   adding one. JavaFX has the same treatment (`openjfx`, `libopenjfx-java`,
   `openjfx-swt`). Note that `openjfx` on older releases is JavaFX 11 and will
   not load on a Java 21 runtime — the wrapper's version-mismatch message covers
-  that case. This branch has not yet been exercised on a live Debian system.
+  that case. A first run inside a Linux Mint 22.3 live session found the package
+  probing correct but also showed that a failing `apt-get update` — the usual
+  cause being the installer CD-ROM in a live session's sources — used to kill
+  the installer with no message at all. Package manager failures are now
+  reported per command and the run continues.
 - **Not tested** on NixOS, SteamOS, macOS or BSD.
 
 ## What is and is not in this repository
