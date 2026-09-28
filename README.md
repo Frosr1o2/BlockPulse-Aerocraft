@@ -340,10 +340,10 @@ Does not contain, on purpose:
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
 The code in this repository — the wrapper, the installer, the badge, the icon —
-is licensed under the MIT licence; the text is in [`LICENSE`](LICENSE). All
+is licensed under the custom licence; the text is in [`LICENSE`](LICENSE). All
 trademarks and the game content belong to their respective owners.
 
-Two things here are *not* covered by it, because they are not ours and MIT
+Two things here are *not* covered by it, because they are not ours and custom license
 cannot relicense somebody else's work:
 
 - `app/Launcher.jar` — the official AeroCraft backend, included unmodified, not
