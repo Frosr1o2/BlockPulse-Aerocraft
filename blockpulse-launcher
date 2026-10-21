@@ -1,36 +1,224 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -u
 
-SELF="$(readlink -f "${BASH_SOURCE[0]}")"
-SELF_DIR="$(dirname "$SELF")"
+PORT_VERSION=1.0.0
+LAUNCHER_VERSION=0.6.2
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || SELF_DIR="$PWD"
 
 APP_DIR="${BLOCKPULSE_APP_DIR:-}"
 if [ -z "$APP_DIR" ]; then
     for c in "$SELF_DIR/app" "$SELF_DIR/../app" /usr/lib/blockpulse-launcher/app; do
-        if [ -f "$c/blockpulse-launcher-ui.jar" ]; then APP_DIR="$(readlink -f "$c")"; break; fi
+        if [ -f "$c/blockpulse-launcher-ui.jar" ]; then APP_DIR="$(cd "$c" && pwd -P)"; break; fi
     done
-fi
-if [ -z "$APP_DIR" ] || [ ! -f "$APP_DIR/blockpulse-launcher-ui.jar" ]; then
-    echo "blockpulse-launcher: cannot find blockpulse-launcher-ui.jar (set BLOCKPULSE_APP_DIR)" >&2; exit 1
 fi
 
 CONF_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/blockpulse-launcher"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/blockpulse-launcher"
-mkdir -p "$CONF_DIR" "$STATE_DIR" && chmod 700 "$CONF_DIR" 2>/dev/null
+mkdir -p "$CONF_DIR" "$STATE_DIR" 2>/dev/null
+chmod 700 "$CONF_DIR" 2>/dev/null
 GRAPHICS_CACHE="$CONF_DIR/graphics-cache.sh"
+PREFS_FILE="$CONF_DIR/launcher.properties"
 
-if [ "${1:-}" = "--reset-graphics" ]; then
-    rm -f "$GRAPHICS_CACHE"
-    echo "blockpulse-launcher: cleared the cached graphics configuration."
-    shift
-    [ $# -eq 0 ] && exit 0
+LANG_CODE="${BLOCKPULSE_LANG:-}"
+if [ -z "$LANG_CODE" ] && [ -r "$CONF_DIR/language" ]; then
+    LANG_CODE="$(head -n1 "$CONF_DIR/language" 2>/dev/null)"
+fi
+if [ -z "$LANG_CODE" ]; then
+    case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in
+        uk*|UK*|ua*|UA*) LANG_CODE=uk ;;
+        ru*|RU*) LANG_CODE=ru ;;
+        en*|EN*) LANG_CODE=en ;;
+        *) LANG_CODE=en ;;
+    esac
+fi
+case "$LANG_CODE" in
+    uk|ua|UK|UA) LANG_CODE=uk ;;
+    ru|RU) LANG_CODE=ru ;;
+    *) LANG_CODE=en ;;
+esac
+
+T_en_nojar='cannot find blockpulse-launcher-ui.jar (set BLOCKPULSE_APP_DIR)'
+T_ru_nojar='не найден blockpulse-launcher-ui.jar (укажите BLOCKPULSE_APP_DIR)'
+T_uk_nojar='не знайдено blockpulse-launcher-ui.jar (вкажіть BLOCKPULSE_APP_DIR)'
+T_en_cleared='cleared the cached graphics configuration.'
+T_ru_cleared='кэш графической конфигурации очищен.'
+T_uk_cleared='кеш графічної конфігурації очищено.'
+T_en_cached_broken='the cached graphics configuration stopped working, re-probing...'
+T_ru_cached_broken='сохранённая графическая конфигурация перестала работать, проверяю заново...'
+T_uk_cached_broken='збережена графічна конфігурація перестала працювати, перевіряю знову...'
+T_en_java_missing='Java 21+ not found.'
+T_ru_java_missing='Java 21+ не найдена.'
+T_uk_java_missing='Java 21+ не знайдено.'
+T_en_fx_missing='JavaFX not found.'
+T_ru_fx_missing='JavaFX не найден.'
+T_uk_fx_missing='JavaFX не знайдено.'
+T_en_fx_mismatch='JavaFX was found, but no installed Java can load it (version mismatch).'
+T_ru_fx_mismatch='JavaFX найден, но ни одна установленная Java не может его загрузить (несовпадение версий).'
+T_uk_fx_mismatch='JavaFX знайдено, але жодна встановлена Java не може його завантажити (невідповідність версій).'
+T_en_xwayland='Wayland session without XWayland (DISPLAY is empty).'
+T_ru_xwayland='Сессия Wayland без XWayland (DISPLAY пуст).'
+T_uk_xwayland='Сесія Wayland без XWayland (DISPLAY порожній).'
+T_en_graphics_failed='JavaFX could not initialise a graphics pipeline with any known combination (software rendering, forced Mesa software GL, GTK2 were tried). Run --diagnose, check drivers, or try LIBGL_ALWAYS_SOFTWARE=1.'
+T_ru_graphics_failed='JavaFX не смог запустить графический конвейер ни в одном известном варианте (пробовали программный рендеринг, Mesa software GL и GTK2). Запустите --diagnose, проверьте драйверы или попробуйте LIBGL_ALWAYS_SOFTWARE=1.'
+T_uk_graphics_failed='JavaFX не зміг запустити графічний конвеєр у жодному відомому варіанті (пробували програмний рендеринг, Mesa software GL і GTK2). Запустіть --diagnose, перевірте драйвери або спробуйте LIBGL_ALWAYS_SOFTWARE=1.'
+T_en_usage_1='usage: blockpulse-launcher [options]'
+T_ru_usage_1='использование: blockpulse-launcher [параметры]'
+T_uk_usage_1='використання: blockpulse-launcher [параметри]'
+T_en_usage_diagnose='  --diagnose         print the runtime report and exit'
+T_ru_usage_diagnose='  --diagnose         вывести отчёт о среде запуска и выйти'
+T_uk_usage_diagnose='  --diagnose         вивести звіт про середовище запуску та вийти'
+T_en_usage_reset='  --reset-graphics   forget the cached graphics configuration'
+T_ru_usage_reset='  --reset-graphics   забыть сохранённую графическую конфигурацию'
+T_uk_usage_reset='  --reset-graphics   забути збережену графічну конфігурацію'
+T_en_usage_quiet='  --quiet, -q        print nothing but errors'
+T_ru_usage_quiet='  --quiet, -q        не выводить ничего, кроме ошибок'
+T_uk_usage_quiet='  --quiet, -q        не виводити нічого, крім помилок'
+T_en_usage_help='  --help, -h         this help'
+T_ru_usage_help='  --help, -h         эта справка'
+T_uk_usage_help='  --help, -h         ця довідка'
+T_en_usage_version='  --version, -V      print the version and exit'
+T_ru_usage_version='  --version, -V      показать версию и выйти'
+T_uk_usage_version='  --version, -V      показати версію та вийти'
+T_en_version_port='BlockPulse Aerocraft port %s'
+T_ru_version_port='Порт BlockPulse Aerocraft %s'
+T_uk_version_port='Порт BlockPulse Aerocraft %s'
+T_en_version_launcher='Bundled launcher %s'
+T_ru_version_launcher='Встроенный лаунчер %s'
+T_uk_version_launcher='Вбудований лаунчер %s'
+T_en_usage_title='BlockPulse Aerocraft port %s (launcher %s)'
+T_ru_usage_title='Порт BlockPulse Aerocraft %s (лаунчер %s)'
+T_uk_usage_title='Порт BlockPulse Aerocraft %s (лаунчер %s)'
+T_en_usage_installer='  installer options: ./install.sh --help'
+T_ru_usage_installer='  параметры установщика: ./install.sh --help'
+T_uk_usage_installer='  параметри інсталятора: ./install.sh --help'
+
+t() {
+    local key="$1"; shift
+    local var="T_${LANG_CODE}_${key}"
+    local text="${!var-}"
+    if [ -z "$text" ]; then
+        var="T_en_${key}"
+        text="${!var-}"
+    fi
+    printf -- "${text:-$key}" "$@"
+}
+say() { printf '%s\n' "$*"; }
+err() { printf '%s\n' "$*" >&2; }
+notify() {
+    command -v notify-send >/dev/null 2>&1 && notify-send "BlockPulse Launcher" "$1" >/dev/null 2>&1
+    return 0
+}
+
+QUIET=0
+MODE=run
+SCRIPT_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h) MODE=help ;;
+        --version|-V) MODE=version ;;
+        --diagnose) MODE=diagnose ;;
+        --reset-graphics) MODE=reset ;;
+        --quiet|-q) QUIET=1 ;;
+        *) SCRIPT_ARGS+=("$arg") ;;
+    esac
+done
+
+if [ "$MODE" = version ]; then
+    say "$(t version_port "$PORT_VERSION")"
+    say "$(t version_launcher "$LAUNCHER_VERSION")"
+    exit 0
+fi
+if [ "$MODE" = help ]; then
+    say "$(t usage_title "$PORT_VERSION" "$LAUNCHER_VERSION")"
+    say "$(t usage_1)"
+    say "$(t usage_diagnose)"
+    say "$(t usage_reset)"
+    say "$(t usage_quiet)"
+    say "$(t usage_version)"
+    say "$(t usage_help)"
+    say ""
+    say "$(t usage_installer)"
+    exit 0
 fi
 
-java_version_output() { "$1" -version 2>&1; }
-java_major() { printf '%s\n' "$2" | sed -n '1s/.*version "\([0-9]*\).*/\1/p'; }
-looks_unstable() { printf '%s\n' "$1" | grep -qiE 'internal|-ea|snapshot'; }
+if [ -z "$APP_DIR" ] || [ ! -f "$APP_DIR/blockpulse-launcher-ui.jar" ]; then
+    err "blockpulse-launcher: $(t nojar)"
+    notify "$(t nojar)"
+    exit 1
+fi
+
+if [ "$MODE" = reset ]; then
+    rm -f "$GRAPHICS_CACHE"
+    say "$(t cleared)"
+    exit 0
+fi
+
+total_ram_mb() {
+    local mb=''
+    if [ -r /proc/meminfo ]; then
+        mb="$(awk '/^MemTotal:/ { printf "%d", $2 / 1024 }' /proc/meminfo 2>/dev/null)"
+    elif command -v sysctl >/dev/null 2>&1; then
+        local bytes
+        bytes="$(sysctl -n hw.memsize 2>/dev/null || sysctl -n hw.physmem 2>/dev/null || true)"
+        case "$bytes" in
+            ''|*[!0-9]*) mb='' ;;
+            *) mb=$(( bytes / 1048576 )) ;;
+        esac
+    fi
+    case "$mb" in
+        ''|*[!0-9]*) printf '0' ;;
+        *) printf '%s' "$mb" ;;
+    esac
+}
+
+seed_heap() {
+    local prefs="$PREFS_FILE" total ram want
+    if [ -f "$prefs" ] && grep -q '^[[:space:]]*ramGb=' "$prefs" 2>/dev/null; then
+        return 0
+    fi
+    want="${BLOCKPULSE_RAM_GB:-}"
+    case "$want" in
+        ''|*[!0-9]*) want='' ;;
+    esac
+    if [ -z "$want" ]; then
+        total="$(total_ram_mb)"
+        [ "$total" -gt 0 ] || return 0
+        ram=$(( total * 55 / 100 / 1024 ))
+        [ "$ram" -lt 2 ] && ram=2
+        [ "$ram" -gt 12 ] && ram=12
+        want="$ram"
+    fi
+    [ "$want" -ge 2 ] || want=2
+    [ "$want" -le 12 ] || want=12
+    if [ -s "$prefs" ]; then
+        printf '\nramGb=%s\n' "$want" >>"$prefs" 2>/dev/null
+    else
+        printf 'ramGb=%s\n' "$want" >"$prefs" 2>/dev/null
+    fi
+    chmod 600 "$prefs" 2>/dev/null
+    return 0
+}
+
+seed_heap
+
+java_version_of() {
+    local java="$1" release out
+    release="$(dirname "$java")/../release"
+    if [ -r "$release" ]; then
+        out="$(sed -n 's/^JAVA_VERSION="\([^"]*\)".*/\1/p' "$release" 2>/dev/null | head -1)"
+        [ -n "$out" ] && { printf '%s' "$out"; return 0; }
+    fi
+    out="$("$java" -version 2>&1)"
+    printf '%s' "$(printf '%s\n' "$out" | sed -n '1s/.*version "\([^"]*\)".*/\1/p')"
+}
+java_major_of() {
+    printf '%s' "$1" | sed -n 's/^\([0-9][0-9]*\).*/\1/p'
+}
+looks_unstable() {
+    printf '%s' "$1" | grep -qiE 'internal|-ea|snapshot|beta'
+}
 fx_module_path() {
-    local dir="$1" jar module_path=""
+    local dir="$1" jar module_path=''
     for jar in "$dir"/javafx.*.jar; do
         [ -f "$jar" ] || continue
         case "$jar" in
@@ -39,181 +227,288 @@ fx_module_path() {
                 ;;
         esac
     done
-    printf '%s\n' "$module_path"
+    printf '%s' "$module_path"
 }
 fx_native_path() {
     local dir="$1" candidate
     for candidate in "$dir" /usr/lib/java-openjfx /usr/lib/openjfx; do
         if [ -f "$candidate/libglass.so" ]; then
-            printf '%s\n' "$candidate"
+            printf '%s' "$candidate"
             return 0
         fi
     done
     return 1
 }
-
-JAVA_CANDS=()
-if [ -n "${BLOCKPULSE_JAVA:-}" ]; then
-    JAVA_CANDS=("$BLOCKPULSE_JAVA")
-else
-    [ -n "${JAVA_HOME:-}" ] && JAVA_CANDS+=("$JAVA_HOME/bin/java")
-    while IFS= read -r c; do JAVA_CANDS+=("$c"); done < <(printf '%s\n' /usr/lib/jvm/*/bin/java 2>/dev/null | sort -rV)
-    c="$(command -v java 2>/dev/null || true)"; [ -n "$c" ] && JAVA_CANDS+=("$c")
-fi
+list_jvms() {
+    local out
+    out="$(printf '%s\n' /usr/lib/jvm/*/bin/java "$HOME"/.sdkman/candidates/java/*/bin/java "$HOME"/.jdks/*/bin/java 2>/dev/null)"
+    if printf 'x\n' | sort -rV >/dev/null 2>&1; then
+        out="$(printf '%s\n' "$out" | sort -rV)"
+    else
+        out="$(printf '%s\n' "$out" | sort -r)"
+    fi
+    printf '%s\n' "$out"
+}
 
 FX_CANDS=()
-if [ -n "${JAVAFX_LIB:-}" ]; then
-    FX_CANDS=("$JAVAFX_LIB")
-else
-    for c in /usr/lib/jvm/*openjfx*/lib /usr/share/openjfx/lib /usr/lib/openjfx/lib \
-             /usr/lib64/openjfx/lib /usr/share/openjfx/lib64 /usr/lib64/jvm/*/lib \
-             "${XDG_DATA_HOME:-$HOME/.local/share}"/blockpulse-launcher/javafx/lib; do
-        [ -f "$c/javafx.controls.jar" ] && FX_CANDS+=("$c")
+_fx_discovered=0
+canon_dir() {
+    ( CDPATH= cd -- "$1" 2>/dev/null && pwd -P ) || printf '%s' "$1"
+}
+canon_file() {
+    readlink -f "$1" 2>/dev/null || printf '%s/%s' "$(canon_dir "$(dirname "$1")")" "$(basename "$1")"
+}
+add_fx_dir() {
+    local dir canon existing
+    [ -n "${1:-}" ] || return 0
+    [ -f "$1/javafx.controls.jar" ] || return 0
+    canon="$(canon_dir "$1")"
+    for existing in ${FX_CANDS[@]+"${FX_CANDS[@]}"}; do
+        [ "$existing" = "$canon" ] && return 0
     done
+    FX_CANDS+=("$canon")
+    return 0
+}
+discover_fx() {
+    [ "$_fx_discovered" = 1 ] && return 0
+    _fx_discovered=1
+    local c
+    if [ -n "${JAVAFX_LIB:-}" ]; then
+        add_fx_dir "$JAVAFX_LIB"
+        return 0
+    fi
+    for c in /usr/lib/jvm/*openjfx*/lib /usr/share/openjfx/lib /usr/lib/openjfx/lib \
+             /usr/lib64/openjfx/lib /usr/share/openjfx/lib64 /usr/share/java/openjfx/lib \
+             /usr/lib64/jvm/*/lib \
+             "${XDG_DATA_HOME:-$HOME/.local/share}"/blockpulse-launcher/javafx/lib; do
+        add_fx_dir "$c"
+    done
+    [ "${#FX_CANDS[@]}" -gt 0 ] && return 0
     if command -v pacman >/dev/null 2>&1; then
-        while IFS= read -r c; do
-            [ -n "$c" ] && FX_CANDS+=("$(dirname "$c")")
-        done < <(for pkg in $(pacman -Qqs openjfx 2>/dev/null); do pacman -Ql "$pkg" 2>/dev/null | awk '$2 ~ /javafx\.controls\.jar$/ {print $2}'; done)
+        local pkg
+        for pkg in $(pacman -Qqs openjfx 2>/dev/null); do
+            while IFS= read -r c; do
+                add_fx_dir "$(dirname "$c")"
+            done < <(pacman -Ql "$pkg" 2>/dev/null | awk '$2 ~ /javafx\.controls\.jar$/ {print $2}')
+        done
     elif command -v dpkg-query >/dev/null 2>&1 && dpkg-query -W -f='${Status}\n' openjfx 2>/dev/null | grep -q 'install ok installed'; then
         while IFS= read -r c; do
-            [ -n "$c" ] && FX_CANDS+=("$(dirname "$c")")
+            add_fx_dir "$(dirname "$c")"
         done < <(dpkg -L openjfx 2>/dev/null | awk '/\/javafx\.controls\.jar$/ {print}')
     elif command -v rpm >/dev/null 2>&1; then
-        # Fedora and other rpm distros: ask the database where the jar is,
-        # guessing a path does not survive lib64 and per-JDK packages.
         while IFS= read -r c; do
-            [ -n "$c" ] && FX_CANDS+=("$(dirname "$c")")
+            add_fx_dir "$(dirname "$c")"
         done < <(rpm -qa --qf '%{NAME}\n' 2>/dev/null | grep -ixE 'openjfx|java-[0-9]+-openjfx' \
                  | while IFS= read -r pkg; do rpm -ql "$pkg" 2>/dev/null; done \
                  | awk -F/ '$NF == "javafx.controls.jar" {print}')
     fi
-fi
+    return 0
+}
 
-PAIR_JAVA=(); PAIR_FXARGS_STR=(); PAIR_NATIVE_STR=()
-STABLE_IDX=(); UNSTABLE_IDX=()
-for c in "${JAVA_CANDS[@]}"; do
-    [ -x "$c" ] || continue
-    vout="$(java_version_output "$c")"
-    m="$(java_major "$c" "$vout")"
-    { [ -n "$m" ] && [ "$m" -ge 21 ]; } 2>/dev/null || continue
-    pair_fx=""
-    pair_native=""
-    if "$c" --list-modules 2>/dev/null | grep -q '^javafx\.controls'; then
-        pair_native="$(fx_native_path "$(dirname "$c")/../lib" || true)"
+PAIR_JAVA=()
+PAIR_FXARGS=()
+PAIR_NATIVE=()
+PAIR_STABLE=()
+MAX_PAIRS="${BLOCKPULSE_MAX_PAIRS:-2}"
+
+add_pair() {
+    [ "${#PAIR_JAVA[@]}" -ge "$MAX_PAIRS" ] && return 1
+    PAIR_JAVA+=("$1")
+    PAIR_FXARGS+=("$2")
+    PAIR_NATIVE+=("$3")
+    PAIR_STABLE+=("$4")
+    return 0
+}
+
+probe_pairs() {
+    local java vout major fx_path native stable fxdir
+    local -a candidates=()
+    if [ -n "${BLOCKPULSE_JAVA:-}" ]; then
+        candidates=("$BLOCKPULSE_JAVA")
     else
-        for fx in "${FX_CANDS[@]:-}"; do
-            [ -n "$fx" ] || continue
-            fx_path="$(fx_module_path "$fx")"
-            [ -n "$fx_path" ] || continue
-            if "$c" --module-path "$fx_path" --describe-module javafx.controls >/dev/null 2>&1; then
-                pair_fx="--module-path $fx_path --add-modules javafx.controls,javafx.graphics"
-                pair_native="$(fx_native_path "$fx" || true)"
-                break
-            fi
-        done
-        [ -n "$pair_fx" ] || continue
+        [ -n "${JAVA_HOME:-}" ] && candidates+=("$JAVA_HOME/bin/java")
+        while IFS= read -r java; do [ -n "$java" ] && candidates+=("$java"); done < <(list_jvms)
+        java="$(command -v java 2>/dev/null || true)"
+        [ -n "$java" ] && candidates+=("$java")
     fi
-    idx=${#PAIR_JAVA[@]}
-    PAIR_JAVA+=("$c"); PAIR_FXARGS_STR+=("$pair_fx"); PAIR_NATIVE_STR+=("$pair_native")
-    if looks_unstable "$vout"; then UNSTABLE_IDX+=("$idx"); else STABLE_IDX+=("$idx"); fi
-done
-ORDER=("${STABLE_IDX[@]}" "${UNSTABLE_IDX[@]}")
+    local seen=' ' cpath
+    local -a all_java=() all_fx=() all_nat=() all_st=()
+    for java in "${candidates[@]}"; do
+        [ -x "$java" ] || continue
+        cpath="$(canon_file "$java")"
+        case "$seen" in *" $cpath "*) continue ;; esac
+        seen="$seen$cpath "
+        vout="$(java_version_of "$java")"
+        major="$(java_major_of "$vout")"
+        [ -n "$major" ] && [ "$major" -ge 21 ] 2>/dev/null || continue
+        stable=1
+        looks_unstable "$vout" && stable=0
+        fx_path=''
+        native=''
+        if "$java" --list-modules 2>/dev/null | grep -q '^javafx\.controls'; then
+            native="$(fx_native_path "$(dirname "$java")/../lib" || true)"
+        else
+            discover_fx
+            for fxdir in ${FX_CANDS[@]+"${FX_CANDS[@]}"}; do
+                [ -n "$fxdir" ] || continue
+                fx_path="$(fx_module_path "$fxdir")"
+                [ -n "$fx_path" ] || continue
+                if "$java" --module-path "$fx_path" --describe-module javafx.controls >/dev/null 2>&1; then
+                    native="$(fx_native_path "$fxdir" || true)"
+                    break
+                fi
+                fx_path=''
+            done
+            [ -n "$fx_path" ] || continue
+            fx_path="--module-path $fx_path --add-modules javafx.controls,javafx.graphics"
+        fi
+        all_java+=("$java"); all_fx+=("$fx_path"); all_nat+=("$native"); all_st+=("$stable")
+    done
+    local pass=1 idx
+    while [ "$pass" -ge 0 ]; do
+        idx=0
+        while [ "$idx" -lt "${#all_java[@]}" ]; do
+            if [ "${all_st[$idx]}" = "$pass" ] && [ "${#PAIR_JAVA[@]}" -lt "$MAX_PAIRS" ]; then
+                add_pair "${all_java[$idx]}" "${all_fx[$idx]}" "${all_nat[$idx]}" "$pass"
+            fi
+            idx=$((idx + 1))
+        done
+        pass=$((pass - 1))
+    done
+}
 
-if [ "${1:-}" = "--diagnose" ]; then
+if [ "$MODE" = diagnose ]; then
+    pair_count=0
+    probe_pairs
+    pair_count="${#PAIR_JAVA[@]}"
     echo "== BlockPulse Launcher diagnostics =="
     echo "-- system --"
     uname -a
-    echo "session: XDG_SESSION_TYPE=${XDG_SESSION_TYPE:-<unset>} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-<unset>} DISPLAY=${DISPLAY:-<unset>} GDK_BACKEND=${GDK_BACKEND:-<unset>}"
+    session_type="${XDG_SESSION_TYPE:-}"
+    if [ -z "$session_type" ] && [ -S "/run/user/$(id -u)/wayland-0" ]; then
+        session_type=wayland
+    fi
+    if [ -z "$session_type" ] && [ -n "${DISPLAY:-}" ]; then
+        session_type=x11
+    fi
+    echo "session: type=${session_type:-unknown} WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-<unset>} DISPLAY=${DISPLAY:-<unset>} GDK_BACKEND=${GDK_BACKEND:-<unset>}"
+    echo "app: ${APP_DIR:-<missing>}"
+    echo "language: $LANG_CODE"
+    echo "port version: $PORT_VERSION"
+    echo "launcher version: $LAUNCHER_VERSION"
+    echo "heap seeded preference: $(sed -n 's/^ramGb=//p' "$PREFS_FILE" 2>/dev/null | head -1)"
     echo "-- java candidates (>=21, usable with a javafx) --"
-    if [ "${#PAIR_JAVA[@]}" -eq 0 ]; then
+    if [ "$pair_count" -eq 0 ]; then
         echo "  none found"
     else
-        for i in "${ORDER[@]}"; do
-            tag=""; looks_unstable "$(java_version_output "${PAIR_JAVA[$i]}")" && tag=" (looks unstable/EA)"
-            printf '  %s  fx-args="%s" native="%s"%s\n' "${PAIR_JAVA[$i]}" "${PAIR_FXARGS_STR[$i]}" "${PAIR_NATIVE_STR[$i]}" "$tag"
+        i=0
+        while [ "$i" -lt "$pair_count" ]; do
+            printf '  %s  fx-args="%s" native="%s" stable=%s\n' "${PAIR_JAVA[$i]}" "${PAIR_FXARGS[$i]}" "${PAIR_NATIVE[$i]}" "${PAIR_STABLE[$i]}"
+            i=$((i + 1))
         done
     fi
     echo "-- javafx lib dirs found --"
+    discover_fx
     if [ "${#FX_CANDS[@]}" -eq 0 ]; then echo "  none"; else printf '  %s\n' "${FX_CANDS[@]}"; fi
     echo "-- OpenGL (needs mesa-utils for glxinfo) --"
     if command -v glxinfo >/dev/null 2>&1; then
         glxinfo 2>/dev/null | grep -i -E 'direct rendering|OpenGL (vendor|renderer|version)'
     else
-        echo "  glxinfo not installed (Arch: sudo pacman -S mesa-utils; Debian/Ubuntu: sudo apt-get install mesa-utils)"
+        echo "  glxinfo not installed (optional; Arch: sudo pacman -S mesa-utils, Debian/Ubuntu: sudo apt-get install mesa-utils)"
     fi
     echo "-- relevant packages --"
     if command -v pacman >/dev/null 2>&1; then
-        for pkg in mesa libglvnd gtk3 gtk2 java21-openjfx jre21-openjdk jdk21-openjdk xorg-xwayland; do
-            pacman -Qi "$pkg" 2>/dev/null | grep -E '^(Name|Version)' || echo "  $pkg: not installed"
+        seen_pkgs=' '
+        for pkg in mesa libglvnd gtk3 gtk2 jre21-openjdk java21-openjfx xorg-xwayland; do
+            resolved="$(pacman -Qq "$pkg" 2>/dev/null | head -1)"
+            if [ -z "$resolved" ]; then
+                echo "  $pkg: not installed"
+                continue
+            fi
+            case "$seen_pkgs" in *" $resolved "*) continue ;; esac
+            seen_pkgs="$seen_pkgs$resolved "
+            printf '  %s %s\n' "$resolved" "$(pacman -Q "$resolved" 2>/dev/null | awk '{print $2}')"
         done
     elif command -v dpkg-query >/dev/null 2>&1; then
         for pkg in openjfx openjdk-21-jre openjdk-21-jdk xwayland mesa-utils libgtk-3-0; do
-            dpkg-query -W -f='${Package} ${Version} ${Status}\n' "$pkg" 2>/dev/null || echo "  $pkg: not installed"
+            info="$(dpkg-query -W -f='${Status}\t${Package}\t${Version}\n' "$pkg" 2>/dev/null)"
+            case "$info" in
+                *"install ok installed"*) printf '  %s\n' "$(printf '%s' "$info" | awk -F'\t' '{print $2" "$3}')" ;;
+                *) echo "  $pkg: not installed" ;;
+            esac
         done
     else
         echo "  package manager not available"
     fi
-    echo "-- native libraries referenced by JavaFX (missing .so dependencies, if any) --"
-    for fx in "${FX_CANDS[@]:-}"; do
+    echo "-- JavaFX native libraries (checked with the JDK library path) --"
+    java_bin="$(command -v java 2>/dev/null || true)"
+    jdk_lib=''
+    if [ -n "$java_bin" ]; then
+        java_real="$(readlink -f "$java_bin" 2>/dev/null || printf '%s' "$java_bin")"
+        jdk_lib="$(dirname "$(dirname "$java_real")")/lib"
+    fi
+    for fx in ${FX_CANDS[@]+"${FX_CANDS[@]}"}; do
         [ -n "$fx" ] || continue
-        while IFS= read -r -d '' so; do
-            missing="$(ldd "$so" 2>/dev/null | awk '/not found/{print $1}')"
-            [ -n "$missing" ] && printf '  %s is missing: %s\n' "$so" "$missing"
-        done < <(find "$fx" -maxdepth 1 -name '*.so' -print0 2>/dev/null)
+        checked=0
+        missing_all=''
+        for so in "$fx"/libglass.so "$fx"/libprism_*.so "$fx"/libjavafx_*.so "$fx"/libdecora_sse.so "$fx"/libfxplugins.so "$fx"/libavplugin.so "$fx"/libgstreamer-lite.so "$fx"/libjfxmedia.so; do
+            [ -f "$so" ] || continue
+            checked=$((checked + 1))
+            miss="$(LD_LIBRARY_PATH="$fx${jdk_lib:+:$jdk_lib}${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" ldd "$so" 2>/dev/null | awk '/not found/ {print $1}' | sort -u | tr '\n' ' ')"
+            [ -n "$miss" ] && missing_all="${missing_all}  $so: $miss"$'\n'
+        done
+        if [ "$checked" -eq 0 ]; then
+            echo "  $fx: no JavaFX native libraries"
+        elif [ -z "$missing_all" ]; then
+            echo "  $fx: all dependencies resolved ($checked libraries)"
+        else
+            printf '%s' "$missing_all"
+        fi
     done
+    if [ "${#FX_CANDS[@]}" -eq 0 ]; then
+        echo "  no JavaFX directory found"
+    fi
     echo "-- cached working combination --"
     if [ -f "$GRAPHICS_CACHE" ]; then cat "$GRAPHICS_CACHE"; else echo "  none yet"; fi
     echo "== end of report =="
     exit 0
 fi
 
-if [ "${#PAIR_JAVA[@]}" -eq 0 ]; then
-    saw_java21=0
-    for c in "${JAVA_CANDS[@]:-}"; do
-        [ -n "$c" ] && [ -x "$c" ] || continue
-        m="$(java_major "$c" "$(java_version_output "$c")")"
-        { [ -n "$m" ] && [ "$m" -ge 21 ]; } 2>/dev/null && saw_java21=1 && break
-    done
-    if [ "$saw_java21" = 0 ]; then
-        if command -v apt-get >/dev/null 2>&1; then msg="Java 21+ not found. Install:  sudo apt-get install openjdk-21-jre openjfx"
-        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then msg="Java 21+ not found. Install:  sudo dnf install java-21-openjdk openjfx"
-        else msg="Java 21+ not found. Install:  sudo pacman -S jdk21-openjdk java21-openjfx"; fi
-    elif [ "${#FX_CANDS[@]}" = 0 ]; then
-        if command -v apt-get >/dev/null 2>&1; then msg="JavaFX not found. Install:  sudo apt-get install openjfx"
-        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then msg="JavaFX not found. Install:  sudo dnf install openjfx"
-        else msg="JavaFX not found. Install:  sudo pacman -S java21-openjfx"; fi
-    else
-        if command -v apt-get >/dev/null 2>&1; then msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install OpenJDK 21 and OpenJFX from the same distro repositories."
-        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install matching ones:  sudo dnf install java-21-openjdk openjfx"
-        else msg="JavaFX found (${FX_CANDS[*]}) but no installed Java can load it (version mismatch). Install matching ones:  sudo pacman -S jdk21-openjdk java21-openjfx"; fi
-    fi
-    echo "blockpulse-launcher: $msg" >&2
-    command -v notify-send >/dev/null 2>&1 && notify-send "BlockPulse Launcher" "$msg"
-    exit 1
-fi
-
-if [ -n "${WAYLAND_DISPLAY:-}" ] && [ -z "${GDK_BACKEND:-}" ]; then
-    if [ -n "${DISPLAY:-}" ]; then
-        export GDK_BACKEND=x11
-    else
-        if command -v apt-get >/dev/null 2>&1; then
-            echo "blockpulse-launcher: Wayland session without XWayland (DISPLAY is empty). Install it:  sudo apt-get install xwayland" >&2
-            command -v notify-send >/dev/null 2>&1 && notify-send "BlockPulse Launcher" "XWayland not running: sudo apt-get install xwayland"
-        else
-            echo "blockpulse-launcher: Wayland session without XWayland (DISPLAY is empty). Install it:  sudo pacman -S xorg-xwayland" >&2
-            command -v notify-send >/dev/null 2>&1 && notify-send "BlockPulse Launcher" "XWayland not running: sudo pacman -S xorg-xwayland"
-        fi
-    fi
-fi
-
 PREFS_ARGS=(
     -Djava.util.prefs.userRoot="$CONF_DIR"
-    -Daerocraft.launcher.prefsFile="$CONF_DIR/launcher.properties"
+    -Daerocraft.launcher.prefsFile="$PREFS_FILE"
 )
 BASE_JVM_ARGS=(-Djava.awt.headless=true -Dfile.encoding=UTF-8 -Djdk.tls.client.protocols=TLSv1.2)
+BOOTSTRAP_URL='https://api.block-pulse.org/api/launcher/bootstrap?locale=en&channel=stable'
+OFFLINE_ARGS=()
+
+backend_offline() {
+    local marker="$STATE_DIR/backend-offline" stamp now
+    stamp="$(head -n1 "$marker" 2>/dev/null)"
+    case "$stamp" in
+        ''|*[!0-9]*) stamp=0 ;;
+    esac
+    now="$(date +%s)"
+    if [ $((now - stamp)) -lt 600 ]; then
+        return 0
+    fi
+    command -v curl >/dev/null 2>&1 || return 1
+    if curl -fsS -o /dev/null -m "${BLOCKPULSE_PROBE_TIMEOUT:-0.6}" "$BOOTSTRAP_URL" 2>/dev/null; then
+        rm -f "$marker" 2>/dev/null
+        return 1
+    fi
+    printf '%s\n' "$now" >"$marker" 2>/dev/null
+    return 0
+}
+
+if [ "${BLOCKPULSE_ONLINE:-0}" != 1 ] && [ -z "${AEROCORE_BASE_URL:-}" ] \
+   && ! printf '%s' "${BLOCKPULSE_JAVA_OPTS:-}" | grep -q 'aerocraft\.aerocore\.baseUrl'; then
+    if backend_offline; then
+        OFFLINE_ARGS=(-Daerocraft.aerocore.baseUrl=http://127.0.0.1:1)
+    fi
+fi
 MAIN_CLASS=com.blockpulse.aerocraft.launcher.ui.AeroCraftLauncherUiApp
 CP_ARGS=(-cp "$APP_DIR/blockpulse-launcher-ui.jar:$APP_DIR/Launcher.jar")
-SCRIPT_ARGS=("$@")
 
 PRESET_ENV=(
     ""
@@ -231,103 +526,227 @@ PRESET_ARGS=(
 )
 
 GRAPHICS_FAILURE_RE='no suitable pipeline found|Error initializing QuantumRenderer|No toolkit found'
+GRACE_SECONDS="${BLOCKPULSE_GRACE_SECONDS:-8}"
+ATTEMPT_STABLE=0
+
+terminate() {
+    local pid="$1" i=0
+    kill "$pid" 2>/dev/null
+    while kill -0 "$pid" 2>/dev/null && [ "$i" -lt 20 ]; do
+        sleep 0.1
+        i=$((i + 1))
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+        kill -9 "$pid" 2>/dev/null
+    fi
+}
 
 run_attempt() {
     local out="$1"; shift
+    : >"$out"
     "$@" >"$out" 2>&1 &
-    local pid=$!
-    local iterations=0
+    local pid=$! start=$SECONDS rc=0 stable=0
+    ATTEMPT_STABLE=0
     while kill -0 "$pid" 2>/dev/null; do
         if grep -qE "$GRAPHICS_FAILURE_RE" "$out" 2>/dev/null; then
-            sleep 0.3
-            kill "$pid" 2>/dev/null
+            sleep 0.2
+            terminate "$pid"
             wait "$pid" 2>/dev/null
             return 2
         fi
-        sleep 0.3
-        iterations=$((iterations + 1))
-        [ "$iterations" -ge 20 ] && break
+        if [ $((SECONDS - start)) -ge "$GRACE_SECONDS" ]; then
+            stable=1
+            break
+        fi
+        sleep 0.2
     done
-    wait "$pid" 2>/dev/null
-    local rc=$?
+    if wait "$pid" 2>/dev/null; then rc=0; else rc=$?; fi
     grep -qE "$GRAPHICS_FAILURE_RE" "$out" 2>/dev/null && return 2
-    return $rc
+    [ "$stable" = 1 ] && ATTEMPT_STABLE=1
+    return "$rc"
 }
 
 launch_with() {
     local java="$1" fxargs="$2" native="$3" envstr="$4" extra="$5" out="$6"
-    local fx_arr=() extra_arr=() env_arr=() opts_arr=()
+    local -a cmd=() fx_arr=() extra_arr=() env_arr=() opts_arr=()
     [ -n "$fxargs" ] && read -r -a fx_arr <<<"$fxargs"
     [ -n "$extra" ] && read -r -a extra_arr <<<"$extra"
     [ -n "$envstr" ] && read -r -a env_arr <<<"$envstr"
     [ -n "$native" ] && env_arr+=("LD_LIBRARY_PATH=$native${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}")
     [ -n "${BLOCKPULSE_JAVA_OPTS:-}" ] && read -r -a opts_arr <<<"${BLOCKPULSE_JAVA_OPTS}"
-    run_attempt "$out" env "${env_arr[@]}" "$java" "${fx_arr[@]}" "${PREFS_ARGS[@]}" "${BASE_JVM_ARGS[@]}" \
-        "${extra_arr[@]}" "${opts_arr[@]}" "${CP_ARGS[@]}" "$MAIN_CLASS" "${SCRIPT_ARGS[@]}"
+    cmd=(env)
+    [ "${#env_arr[@]}" -gt 0 ] && cmd+=("${env_arr[@]}")
+    cmd+=("$java")
+    [ "${#fx_arr[@]}" -gt 0 ] && cmd+=("${fx_arr[@]}")
+    cmd+=("${PREFS_ARGS[@]}" "${BASE_JVM_ARGS[@]}")
+    [ "${#OFFLINE_ARGS[@]}" -gt 0 ] && cmd+=("${OFFLINE_ARGS[@]}")
+    [ "${#extra_arr[@]}" -gt 0 ] && cmd+=("${extra_arr[@]}")
+    [ "${#opts_arr[@]}" -gt 0 ] && cmd+=("${opts_arr[@]}")
+    cmd+=("${CP_ARGS[@]}" "$MAIN_CLASS")
+    [ "${#SCRIPT_ARGS[@]}" -gt 0 ] && cmd+=("${SCRIPT_ARGS[@]}")
+    run_attempt "$out" "${cmd[@]}"
 }
 
 LOG="$STATE_DIR/launcher.log"
-INTERACTIVE=0; [ -t 1 ] && INTERACTIVE=1
 TMP_OUT="$(mktemp "${TMPDIR:-/tmp}/blockpulse-launcher.XXXXXX")"
 trap 'rm -f "$TMP_OUT"' EXIT
 
 flush_output() {
-    if [ "$INTERACTIVE" = 1 ]; then
+    [ -s "$TMP_OUT" ] || return 0
+    if [ -t 1 ]; then
         cat "$TMP_OUT"
     else
-        [ -f "$LOG" ] && [ "$(stat -c %s "$LOG" 2>/dev/null || echo 0)" -gt 5242880 ] && mv -f "$LOG" "$LOG.old"
-        cat "$TMP_OUT" >>"$LOG"
+        if [ -f "$LOG" ] && [ "$(wc -c <"$LOG" 2>/dev/null || printf 0)" -gt 5242880 ]; then
+            mv -f "$LOG" "$LOG.old" 2>/dev/null
+        fi
+        cat "$TMP_OUT" >>"$LOG" 2>/dev/null
     fi
 }
 
 try_and_report() {
     local java="$1" fxargs="$2" native="$3" envstr="$4" extra="$5"
-    : >"$TMP_OUT"
     launch_with "$java" "$fxargs" "$native" "$envstr" "$extra" "$TMP_OUT"
     local rc=$?
     flush_output
-    return $rc
+    return "$rc"
 }
 
+write_cache() {
+    local java="$1" fxargs="$2" native="$3" envstr="$4" extra="$5" tmp
+    tmp="$GRAPHICS_CACHE.$$"
+    {
+        printf 'CACHED_JAVA=%q\n' "$java"
+        printf 'CACHED_FXARGS=%q\n' "$fxargs"
+        printf 'CACHED_NATIVE=%q\n' "$native"
+        printf 'CACHED_ENV=%q\n' "$envstr"
+        printf 'CACHED_EXTRA=%q\n' "$extra"
+    } >"$tmp" 2>/dev/null && mv -f "$tmp" "$GRAPHICS_CACHE" 2>/dev/null
+    chmod 600 "$GRAPHICS_CACHE" 2>/dev/null
+    return 0
+}
+
+cache_valid() {
+    CACHED_JAVA=''; CACHED_FXARGS=''; CACHED_NATIVE=''; CACHED_ENV=''; CACHED_EXTRA=''
+    [ -f "$GRAPHICS_CACHE" ] || return 1
+    . "$GRAPHICS_CACHE" 2>/dev/null || return 1
+    [ -n "${CACHED_JAVA:-}" ] && [ -x "$CACHED_JAVA" ] || return 1
+    if [ -n "${BLOCKPULSE_JAVA:-}" ] && [ "$BLOCKPULSE_JAVA" != "$CACHED_JAVA" ]; then
+        return 1
+    fi
+    local fxpath='' jar
+    fxpath="$(printf '%s' "${CACHED_FXARGS:-}" | sed -n 's/.*--module-path \([^ ]*\).*/\1/p')"
+    if [ -n "$fxpath" ]; then
+        local -a jar_list=()
+        IFS=':' read -r -a jar_list <<<"$fxpath"
+        for jar in "${jar_list[@]}"; do
+            [ -f "$jar" ] || return 1
+        done
+    fi
+    if [ -n "${CACHED_NATIVE:-}" ] && [ ! -d "$CACHED_NATIVE" ]; then
+        return 1
+    fi
+    return 0
+}
+
+wayland_note() {
+    [ -n "${WAYLAND_DISPLAY:-}" ] || return 0
+    [ -n "${GDK_BACKEND:-}" ] && return 0
+    [ -n "${DISPLAY:-}" ] && { export GDK_BACKEND=x11; return 0; }
+    local hint=''
+    if command -v apt-get >/dev/null 2>&1; then
+        hint='sudo apt-get install xwayland'
+    elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then
+        hint='sudo dnf install xorg-x11-server-Xwayland'
+    else
+        hint='sudo pacman -S xorg-xwayland'
+    fi
+    err "blockpulse-launcher: $(t xwayland) $hint"
+    notify "$(t xwayland) $hint"
+}
+
+no_java_message() {
+    local hint
+    if command -v apt-get >/dev/null 2>&1; then
+        if [ "${#FX_CANDS[@]}" -eq 0 ]; then
+            hint='sudo apt-get install openjdk-21-jre openjfx'
+        else
+            hint='sudo apt-get install openjdk-21-jre'
+        fi
+    elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then
+        hint='sudo dnf install java-21-openjdk openjfx'
+    else
+        hint='sudo pacman -S jdk21-openjdk java21-openjfx'
+    fi
+    err "blockpulse-launcher: $(t java_missing) $hint"
+}
+
+if cache_valid; then
+    try_and_report "$CACHED_JAVA" "$CACHED_FXARGS" "$CACHED_NATIVE" "$CACHED_ENV" "$CACHED_EXTRA"
+    rc=$?
+    if [ "$rc" = 0 ]; then exit 0; fi
+    if [ "$rc" != 2 ]; then exit "$rc"; fi
+    rm -f "$GRAPHICS_CACHE"
+    [ "$QUIET" = 1 ] || err "blockpulse-launcher: $(t cached_broken)"
+fi
+
+probe_pairs
+
+if [ "${#PAIR_JAVA[@]}" -eq 0 ]; then
+    saw_java=0
+    while IFS= read -r c; do
+        [ -x "$c" ] || continue
+        v="$(java_version_of "$c")"
+        m="$(java_major_of "$v")"
+        if [ -n "$m" ] && [ "$m" -ge 21 ] 2>/dev/null; then saw_java=1; break; fi
+    done < <(list_jvms)
+    if [ "$saw_java" = 0 ] && command -v java >/dev/null 2>&1; then
+        v="$(java_version_of "$(command -v java)")"
+        m="$(java_major_of "$v")"
+        [ -n "$m" ] && [ "$m" -ge 21 ] 2>/dev/null && saw_java=1
+    fi
+    discover_fx
+    if [ "$saw_java" = 0 ]; then
+        no_java_message
+    elif [ "${#FX_CANDS[@]}" -eq 0 ]; then
+        if command -v apt-get >/dev/null 2>&1; then hint='sudo apt-get install openjfx'
+        elif command -v dnf >/dev/null 2>&1 || command -v dnf5 >/dev/null 2>&1; then hint='sudo dnf install openjfx'
+        else hint='sudo pacman -S java21-openjfx'; fi
+        err "blockpulse-launcher: $(t fx_missing) $hint"
+        notify "$(t fx_missing) $hint"
+    else
+        err "blockpulse-launcher: $(t fx_mismatch) ${FX_CANDS[*]}"
+        notify "$(t fx_mismatch)"
+    fi
+    exit 1
+fi
+
+wayland_note
+
 if [ "${BLOCKPULSE_NO_RETRY:-0}" = "1" ]; then
-    try_and_report "${PAIR_JAVA[${ORDER[0]}]}" "${PAIR_FXARGS_STR[${ORDER[0]}]}" "${PAIR_NATIVE_STR[${ORDER[0]}]}" "" "--enable-native-access=javafx.graphics,ALL-UNNAMED"
+    try_and_report "${PAIR_JAVA[0]}" "${PAIR_FXARGS[0]}" "${PAIR_NATIVE[0]}" "" "--enable-native-access=javafx.graphics,ALL-UNNAMED"
     exit $?
 fi
 
-if [ -f "$GRAPHICS_CACHE" ]; then
-    CACHED_JAVA=""; CACHED_FXARGS=""; CACHED_NATIVE=""; CACHED_ENV=""; CACHED_EXTRA=""
-    source "$GRAPHICS_CACHE"
-    if [ -n "$CACHED_JAVA" ] && [ -x "$CACHED_JAVA" ]; then
-        try_and_report "$CACHED_JAVA" "$CACHED_FXARGS" "$CACHED_NATIVE" "$CACHED_ENV" "$CACHED_EXTRA"
-        rc=$?
-        [ "$rc" = 0 ] && exit 0
-        [ "$rc" != 2 ] && exit "$rc"
-        echo "blockpulse-launcher: the cached graphics configuration stopped working, re-probing..." >&2
-    fi
-fi
-
-for i in "${ORDER[@]}"; do
+i=0
+while [ "$i" -lt "${#PAIR_JAVA[@]}" ]; do
     java="${PAIR_JAVA[$i]}"
-    fxargs="${PAIR_FXARGS_STR[$i]}"
-    for p in "${!PRESET_ARGS[@]}"; do
-        try_and_report "$java" "$fxargs" "${PAIR_NATIVE_STR[$i]}" "${PRESET_ENV[$p]}" "${PRESET_ARGS[$p]}"
+    fxargs="${PAIR_FXARGS[$i]}"
+    p=0
+    while [ "$p" -lt "${#PRESET_ARGS[@]}" ]; do
+        try_and_report "$java" "$fxargs" "${PAIR_NATIVE[$i]}" "${PRESET_ENV[$p]}" "${PRESET_ARGS[$p]}"
         rc=$?
         if [ "$rc" != 2 ]; then
-            if [ "$rc" = 0 ]; then
-                {
-                    echo "CACHED_JAVA=$java"
-                    printf 'CACHED_FXARGS=%q\n' "$fxargs"
-                    printf 'CACHED_NATIVE=%q\n' "${PAIR_NATIVE_STR[$i]}"
-                    printf 'CACHED_ENV=%q\n' "${PRESET_ENV[$p]}"
-                    printf 'CACHED_EXTRA=%q\n' "${PRESET_ARGS[$p]}"
-                } >"$GRAPHICS_CACHE"
+            if [ "$rc" = 0 ] || [ "$ATTEMPT_STABLE" = 1 ]; then
+                write_cache "$java" "$fxargs" "${PAIR_NATIVE[$i]}" "${PRESET_ENV[$p]}" "${PRESET_ARGS[$p]}"
             fi
             exit "$rc"
         fi
+        p=$((p + 1))
     done
+    i=$((i + 1))
 done
 
-msg="JavaFX could not initialise a graphics pipeline with any known combination (tried software rendering, forced Mesa software GL, GTK2). Run 'blockpulse-launcher --diagnose' and check for missing libraries/drivers, or try 'LIBGL_ALWAYS_SOFTWARE=1 blockpulse-launcher'. Full log: $STATE_DIR/launcher.log"
-echo "blockpulse-launcher: $msg" >&2
-command -v notify-send >/dev/null 2>&1 && notify-send "BlockPulse Launcher" "$msg"
+msg="$(t graphics_failed) Log: $LOG"
+err "blockpulse-launcher: $msg"
+notify "$msg"
 exit 1

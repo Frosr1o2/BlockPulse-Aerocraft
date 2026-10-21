@@ -16,9 +16,12 @@ macOS and BSD — the runtime wrapper, the installer, the modpack profiles and
 both jars, so a clone is ready to install:
 
 - `blockpulse-launcher` — a runtime wrapper that finds a Java 21 runtime and
-  JavaFX, probes the renderers and starts the launcher;
-- `install.sh` — installer, uninstaller and package bookkeeping;
-- `app/profiles/` — the modpack profile definitions the launcher expects.
+  JavaFX, reuses a cached renderer choice, seeds the game's memory setting and
+  starts the launcher;
+- `install.sh` — installer, uninstaller and package bookkeeping, with a
+  Ukrainian / Russian / English interface and a quiet progress mode;
+- `app/profiles/` — the modpack profile definitions the launcher expects,
+  tuned with G1 flags for the game process.
 
 **This repository contains no launcher source.** No decompiled code is
 published here, and neither jar is built from source in this repository. Both
@@ -26,6 +29,19 @@ artifacts are included as-is so that a clone is ready to install.
 
 If you came here to build the launcher from source, this is the wrong
 repository — there is nothing to build.
+
+## Versions
+
+| What | Version |
+|---|---|
+| this port (installer, wrapper, profiles) | **1.0.0** |
+| bundled BlockPulse launcher | **0.6.2** |
+
+`./blockpulse-launcher --version` and `./install.sh --version` print both, so
+the two are never confused in a bug report. The launcher's own
+`build-info.properties` stays at `0.6.2` on purpose (see
+[Known limitations](#known-limitations)); the port version changes with
+packaging releases.
 
 ---
 
@@ -86,18 +102,48 @@ installation side of the port, not the code.
 
 ```sh
 ./install.sh                          # install into ~/.local/share/BlockPulse
+./install.sh --quiet                  # the same, one progress line, no package-manager noise
+./install.sh --lang uk                # interface language: uk, ru or en
+./install.sh --yes                    # accept every prompt, for scripts
+./install.sh --dry-run                # check the system only, change nothing
 ./install.sh --uninstall              # remove the launcher, the game, settings and logs
 ./install.sh --uninstall --keep-game  # the same, but keep Minecraft
 ./install.sh --uninstall-all          # also remove the packages the installer added
 ./install.sh --debug                  # verbose: what the package manager answered
 
 blockpulse-launcher                   # run
+blockpulse-launcher --version
 blockpulse-launcher --diagnose
 blockpulse-launcher --reset-graphics
+blockpulse-launcher --quiet
 ```
 
+`blockpulse-launcher --help` lists the wrapper's own flags and points at
+`./install.sh --help` for the installer's, so the two never drift apart in the
+documentation.
+
+On the first run the installer asks for the interface language and remembers
+it in `~/.config/blockpulse-launcher/language`; the wrapper reads the same file,
+so the language chosen once stays chosen. `--lang uk|ru|en` and the
+`BLOCKPULSE_LANG` environment variable override it without touching the
+remembered value. This file controls the installer and the wrapper only — the
+launcher window has its own language switch in the top bar.
+
+There are three output modes. The default prints one line per step and keeps
+the package-manager output in
+`~/.local/state/blockpulse-launcher/install.log`, so the screen stays readable
+when something fails. `--quiet` replaces the step lines with a single progress
+bar (`[####----] 95%`) and needs a terminal; when the output is redirected it
+falls back to `[2/4] 50%  copy files`. `--debug` streams everything live and is
+the mode to use when reporting a packaging problem. `--help` prints every option
+grouped by purpose (install, removal, output and language) together with
+examples, and `--version` prints the port and launcher versions without
+touching anything.
+
 `install.sh` refuses to install anything if the two jars are missing and prints
-where to put them, rather than half-installing.
+where to put them, rather than half-installing. A missing `app/profiles/` set
+does not stop the run, but it is reported even in quiet mode: the launcher would
+start and then find no modpack.
 
 Supported package managers: **pacman** (Arch-based), **apt-get** (Debian-based)
 and **dnf / dnf5 / microdnf** (Fedora, RHEL and their derivatives). The installer
@@ -132,8 +178,11 @@ only packages from that list are touched, so anything you installed yourself is
 never removed. Installations made before this list existed have no record, and
 `--uninstall-all` says so instead of guessing.
 
-Configuration lives in `~/.config/blockpulse-launcher` (mode `0700`), logs in
-`~/.local/state/blockpulse-launcher/launcher.log` with rotation at 5 MB.
+Configuration lives in `~/.config/blockpulse-launcher` (mode `0700`): the
+remembered language, `launcher.properties` with the launcher settings, and
+`graphics-cache.sh` with the renderer combination that worked last time. Logs
+live in `~/.local/state/blockpulse-launcher`: `launcher.log` for the wrapper
+(rotation at 5 MB) and `install.log` for the installer (rotation at 2 MB).
 
 ### Runtime layout
 
@@ -183,14 +232,49 @@ signed module — this port starts the front end directly instead.
   deleting any existing plain-text copy. The prefs file is created with
   `rw-------` and written atomically.
 - **Renderer probing** — the wrapper tries five JavaFX renderer presets
-  (`prism.order=sw`, `prism.order=es2`, `LIBGL_ALWAYS_SOFTWARE=1`,
-  `prism.forceGPU=false`, `-Djdk.gtk.version=2`) and caches the one that
-  works. `BLOCKPULSE_NO_RETRY=1` disables it.
+  (default, `prism.order=sw`, `prism.order=es2` with `LIBGL_ALWAYS_SOFTWARE=1`,
+  `prism.order=sw` plus `prism.forceGPU=false` with `LIBGL_ALWAYS_SOFTWARE=1`,
+  and `-Djdk.gtk.version=2`) and caches the one that works
+  in `~/.config/blockpulse-launcher/graphics-cache.sh`. Later starts use that
+  cache first, so a working system pays no probing cost at all. The cache is
+  written when the launcher exits, provided it either exited cleanly or had
+  already stayed up for eight seconds, so a crash inside the game does not
+  throw it away; it is discarded and rebuilt
+  when the cached Java, its JavaFX jars or the native directory disappear, when
+  `BLOCKPULSE_JAVA` points at another runtime, or when JavaFX itself fails to
+  start. `BLOCKPULSE_NO_RETRY=1` disables the preset loop, and
+  `BLOCKPULSE_MAX_PAIRS` (default 2) limits how many Java + JavaFX pairs are
+  tried.
+- **Fast start when the backend is down** — the UI requests its bootstrap
+  document and news feed synchronously while building the window, each with a
+  four-second timeout, and a server that accepts TCP but never answers stalls
+  both. Before starting the JVM the wrapper sends one short request (0.6 s
+  limit) to the bootstrap endpoint; if it does not answer, those calls are
+  pointed at a refused local port for this launch and the window opens in about
+  1.5 s instead of roughly 11 s. The negative result is remembered for ten
+  minutes, so repeated starts pay nothing extra, and the next probe restores
+  normal behaviour as soon as the backend answers again. `BLOCKPULSE_ONLINE=1`
+  turns the probe off and `BLOCKPULSE_PROBE_TIMEOUT` changes its limit.
+
+### Memory and the game's JVM
+
+On the first start the wrapper writes `ramGb` into
+`~/.config/blockpulse-launcher/launcher.properties`, but only when the key is
+absent: 55% of installed RAM, clamped to 2–12 GiB. The launcher's settings
+screen reads the same key, so a value chosen there wins and is never
+overwritten. `BLOCKPULSE_RAM_GB=6 blockpulse-launcher` seeds a different value
+on a fresh profile.
+
+All five profile definitions carry Aikar-style G1 flags in `jvmArgs`
+(`UseG1GC`, `MaxGCPauseMillis=200`, the G1 size and region percentages,
+`PerfDisableSharedMem`). The launcher appends them after the `-Xmx` it computes
+from the memory setting. `AlwaysPreTouch` is deliberately absent: it trades a
+slower start for steadier ticks, and fast start is what this layer optimises.
 
 ## Diagnostics
 
 ```sh
-./blockpulse-launcher --diagnose    # java, javafx, renderers, natives
+./blockpulse-launcher --diagnose    # java, javafx, packages, natives
 ./install.sh --debug                # installer: what apt/dnf/pacman answered
 ```
 
@@ -199,10 +283,9 @@ prints the candidate list it probed and what the package manager reports, which
 distinguishes "no such package in this release" from "the package lists have
 not been populated yet".
 
-The smoke test is in the UI jar and runs headless:
-
-On Arch the JavaFX jars sit inside the JDK, so the path below is right as is.
-On Debian and Fedora they are a separate package: run
+The smoke test is in the UI jar and runs headless. On Arch JavaFX is the
+separate `java21-openjfx` package, which unpacks into the JDK's own library
+directory (`/usr/lib/jvm/java-21-openjdk/lib` here). On Debian and Fedora run
 `./blockpulse-launcher --diagnose` first and take the directory it prints under
 "javafx lib dirs found" (on Debian that is usually `/usr/share/openjfx/lib`).
 
@@ -228,9 +311,10 @@ AeroCraft FXML-independent UI shell smoke test passed.
 - **The launcher does not update itself on Linux.** The update endpoint serves
   a Windows installer, so an update can only be reported, not applied. Manual
   replacement is required.
-- **The reported version is still `0.6.2`** — the official
-  `build-info.properties` is left untouched on purpose: bumping it would make
-  the launcher demand an update it cannot install.
+- **The bundled launcher still reports `0.6.2`** — `build-info.properties` is
+  deliberately left at the official version: bumping it would make the launcher
+  demand an update it cannot install. The port's own version is separate and
+  changes with packaging releases (see [Versions](#versions)).
 - **The modpack update channel is authenticated only by TLS.** The manifest and
   the archive it names are fetched over the same connection, and the SHA-256
   used to check the archive comes from that same manifest, so the checksum is
@@ -340,10 +424,10 @@ Does not contain, on purpose:
 This repository is **not** affiliated with the BlockPulse / AeroCraft project.
 
 The code in this repository — the wrapper, the installer, the badge, the icon —
-is licensed under the custom licence; the text is in [`LICENSE`](LICENSE). All
+is licensed under the MIT licence; the text is in [`LICENSE`](LICENSE). All
 trademarks and the game content belong to their respective owners.
 
-Two things here are *not* covered by it, because they are not ours and custom license
+Two things here are *not* covered by it, because they are not ours and MIT
 cannot relicense somebody else's work:
 
 - `app/Launcher.jar` — the official AeroCraft backend, included unmodified, not
