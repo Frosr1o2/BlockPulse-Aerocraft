@@ -1,3 +1,7 @@
+THIS REPO WAS ARCHIVED BECAUSE BLOCKPULSE CLOSED AEROCRAFT SERVER AND LAUNCHER
+
+
+
 <p align="center">
   <img src="blockpulse-launcher.png" width="128" height="128" alt="blockpulse-launcher Logo">
 </p>
